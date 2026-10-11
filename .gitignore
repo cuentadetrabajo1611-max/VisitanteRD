@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.mdf
+*.ldf
+*.bak
+*.pem
+*.key
+*.pfx
+*.license.json
+.impeccable/

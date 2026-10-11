@@ -1,0 +1,20 @@
+import {generateKeyPairSync,randomUUID} from 'node:crypto';
+import {afterEach,expect,it} from 'vitest';
+import {NestFactory} from '@nestjs/core';
+import {INestApplication} from '@nestjs/common';
+import request from 'supertest';
+import {issuerModule} from '../apps/licensing/src/app';
+import {LicenseClaims,verifyLicense} from '../packages/core/src';
+let app:INestApplication;
+afterEach(async()=>{await app?.close();});
+it('issues only authorized entitlements and rejects client-selected claims',async()=>{
+  const pair=generateKeyPairSync('ed25519');const now=Math.floor(Date.now()/1000);
+  const claims:LicenseClaims={version:1,licenseId:randomUUID(),tenantId:'synthetic',installationId:randomUUID(),issuedAt:now,notBefore:now,expiresAt:now+60,features:['visits']};
+  app=await NestFactory.create(issuerModule({token:'synthetic-admin-token',keyId:'test',privateKey:pair.privateKey.export({format:'pem',type:'pkcs8'}).toString(),entitlements:[claims]}),{logger:false});await app.init();
+  const http=request(app.getHttpServer());
+  await http.post('/licenses/issue').send({licenseId:claims.licenseId}).expect(401);
+  await http.post('/licenses/issue').set('Authorization','Bearer synthetic-admin-token').send({licenseId:randomUUID()}).expect(403);
+  await http.post('/licenses/issue').set('Authorization','Bearer synthetic-admin-token').send({licenseId:claims.licenseId,expiresAt:now+999999}).expect(400);
+  const result=await http.post('/licenses/issue').set('Authorization','Bearer synthetic-admin-token').send({licenseId:claims.licenseId}).expect(201);
+  expect(verifyLicense(result.body,{test:pair.publicKey.export({format:'pem',type:'spki'}).toString()},{...claims,now})).toEqual(claims);
+});

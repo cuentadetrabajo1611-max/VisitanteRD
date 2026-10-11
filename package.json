@@ -1,0 +1,27 @@
+{
+  "name": "visitante-rd",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @visitante/core && npm run build --workspace @visitante/api && npm run build --workspace @visitante/licensing && npm run build --workspace @visitante/web",
+    "test": "vitest run",
+    "check": "npm run build && npm test",
+    "dev:web": "npm run dev --workspace @visitante/web",
+    "dev:api": "npm run build --workspace @visitante/core && npm run build --workspace @visitante/api && npm run start --workspace @visitante/api",
+    "dev:licensing": "npm run build --workspace @visitante/core && npm run build --workspace @visitante/licensing && npm run start --workspace @visitante/licensing"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.3"
+  }
+}
