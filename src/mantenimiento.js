@@ -90,19 +90,42 @@ async function prepararTenant(tenantId, opciones) {
   return resultado;
 }
 
-/** Permisos por rol. El admin siempre los tiene todos, por diseno. */
+/**
+ * Permisos por rol. El admin siempre los tiene todos, por diseno.
+ *
+ * SOLO SE SIEMBRA LA PRIMERA VEZ, cuando ese rol no tiene ningun permiso guardado.
+ *
+ * Antes se reponia lo que faltara en CADA arranque, y eso tenia un efecto que nadie
+ * esperaba: el administrador puede editar los permisos de un rol desde la pantalla de
+ * Usuarios (PUT /api/usuarios/roles/:rol), y al reiniciar el contenedor —cosa que pasa
+ * en cada actualizacion— el sistema le devolvia en silencio los permisos que habia
+ * quitado. Los cambios del cliente desaparecian sin avisar.
+ *
+ * Si un rol no tiene ningun permiso guardado, es que nunca se sembro: se siembra. Si ya
+ * tiene, lo que hay es lo que el cliente decidio, aunque sea menos de lo que trae el
+ * codigo por defecto.
+ */
 async function sembrarPermisos(tenantId) {
   let n = 0;
+
   for (const [rol, claves] of Object.entries(permisos.ROLES)) {
+    const ya = await bd.consultar(
+      'SELECT COUNT(*) AS n FROM vf_rol_permisos WHERE tenant_id = @tenant_id AND rol = @rol',
+      { tenant_id: tenantId, rol }
+    );
+
+    /* Ya configurado por el cliente (o ya sembrado antes): no se toca. */
+    if (ya.recordset[0].n > 0) continue;
+
     for (const clave of claves) {
       const r = await bd.consultar(
-        `IF NOT EXISTS (SELECT 1 FROM vf_rol_permisos WHERE tenant_id = @tenant_id AND rol = @rol AND permiso = @permiso)
-           INSERT INTO vf_rol_permisos (tenant_id, rol, permiso) VALUES (@tenant_id, @rol, @permiso);`,
+        `INSERT INTO vf_rol_permisos (tenant_id, rol, permiso) VALUES (@tenant_id, @rol, @permiso)`,
         { tenant_id: tenantId, rol, permiso: clave }
       );
       n += r.rowsAffected[0] || 0;
     }
   }
+
   return n;
 }
 
