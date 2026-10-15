@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>VisitaFlow — Sistema de visitantes</title>
+  <meta name="description" content="Registro y control de visitantes con validación de cédula, gafetes y reportes.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%231e3a8a'/><path d='M30 38h40M30 52h28M30 66h34' stroke='white' stroke-width='8' stroke-linecap='round'/></svg>">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <!-- Todo el marcado lo construye app.js: el HTML solo pone el esqueleto. -->
+  <div id="app" hidden>
+    <div class="app">
+      <aside class="barra" id="barra" aria-label="Navegación principal"></aside>
+      <div class="trabajo">
+        <div id="aviso-licencia" hidden></div>
+        <header class="cabecera" id="cabecera"></header>
+        <main class="contenido" id="vista" tabindex="-1"></main>
+      </div>
+    </div>
+  </div>
+
+  <div id="acceso" hidden></div>
+
+  <div class="avisos-flotantes" role="status" aria-live="polite"></div>
+
+  <noscript>
+    <div style="max-width:38rem;margin:4rem auto;padding:0 1.5rem;font-family:system-ui">
+      <h1>Se necesita JavaScript</h1>
+      <p>VisitaFlow es una aplicación web que funciona en el navegador. Active JavaScript para usarla.</p>
+    </div>
+  </noscript>
+
+  <script src="/app.js"></script>
+  <script src="/paginas.js"></script>
+  <script src="/paginas-2.js"></script>
+  <script src="/paginas-3.js"></script>
+  <script src="/paginas-4.js"></script>
+  <script>
+    // Si la direccion trae un token (utilidad de desarrollo / capturas), se
+    // guarda antes de arrancar. En produccion el servidor no emite esos tokens
+    // por la direccion, asi que esto no es una puerta trasera.
+    (function () {
+      const m = location.search.match(/[?&]t=([^&]+)/);
+      if (m) {
+        try { VF.api.guardarToken(decodeURIComponent(m[1])); } catch (e) { /* token ilegible */ }
+        history.replaceState(null, '', location.pathname + location.hash);
+      }
+    })();
+
+    // Arranque: se comprueba la sesion y se decide que mostrar.
+    // Si no hay sesion, VF.mostrarAcceso() pinta la pantalla de acceso.
+    VF.arrancar();
+  </script>
+</body>
+</html>

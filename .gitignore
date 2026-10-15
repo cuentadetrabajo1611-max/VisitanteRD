@@ -1,0 +1,39 @@
+# Lo que NO se sube al repositorio.
+#
+# Lo mas importante: las llaves del licenciamiento y los archivos de entorno.
+# Si la llave privada llegara a un repositorio, cualquiera podria emitir
+# licencias validas para cualquier institucion.
+
+# --- Secretos ---
+.env
+.env.local
+.env.*.local
+licencia.vflow
+*.vflow
+licencias-keys/
+*.pem
+*.key
+CLAVE-ADMINISTRADOR.txt
+
+# --- Datos que no son codigo ---
+datos/
+tmp/
+capturas/
+*.log
+
+# --- Dependencias ---
+node_modules/
+npm-debug.log*
+
+# --- Editores y sistema ---
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Respaldos sueltos de la base ---
+*.bak
+*.mdf
+*.ldf

@@ -1,0 +1,37 @@
+# Finales de línea.
+#
+# Esto importa porque el proyecto se escribe en Windows y se ejecuta en Linux
+# (los contenedores del VPS). Sin esta configuración, Git avisa en cada archivo
+# y puede convertir los finales de línea al hacer checkout, lo que ensucia los
+# diffs y, en el peor caso, rompe scripts que se ejecutan dentro del contenedor.
+#
+# La regla: en el repositorio SIEMPRE salto de línea de Unix (LF). En tu copia
+# de trabajo, Git lo ajusta a lo que use tu sistema.
+
+# Todo el texto, normalizado a LF dentro del repositorio.
+* text=auto eol=lf
+
+# Los scripts que corren en Linux tienen que ser LF sí o sí.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Los de Windows se quedan como Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binarios: no se tocan.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.bak binary
+
+# Los archivos generados no se marcan como texto en los diffs.
+package-lock.json linguist-generated=true

@@ -1,0 +1,920 @@
+/* ============================================================================
+   VisitaFlow - Hoja de estilos principal
+
+   Dos decisiones que ordenan todo lo demas:
+
+   1. La marca de la institucion se aplica con VARIABLES CSS, no incrustada en
+      cada regla. Cambiar el color en Personalizacion repinta el sistema entero,
+      y los colores derivados (barra lateral oscura, bordes suaves) ya vienen
+      calculados desde el servidor para que el contraste no se rompa.
+
+   2. Densidad de trabajo. Esto lo usa recepcion decenas de veces al dia: las
+      filas de tabla son altas, los botones grandes y nada depende de pasar el
+      mouse por encima para entenderse.
+   ============================================================================ */
+
+:root {
+  /* --- Marca (el servidor sobrescribe estas) --- */
+  --marca: #1e3a8a;
+  --marca-oscura: #12234f;
+  --marca-clara: #e8edf9;
+  --marca-acento: #0ea5e9;
+  --marca-secundaria: #f59e0b;
+  --texto-sobre-marca: #ffffff;
+
+  /* --- Neutros --- */
+  --fondo: #f4f6fa;
+  --superficie: #ffffff;
+  --superficie-2: #f8fafc;
+  --borde: #e2e8f0;
+  --borde-fuerte: #cbd5e1;
+  --texto: #0f172a;
+  --texto-suave: #64748b;
+  --texto-tenue: #94a3b8;
+
+  /* --- Estados: un color, un significado --- */
+  --dentro: #15803d;
+  --dentro-fondo: #dcfce7;
+  --pendiente: #b45309;
+  --pendiente-fondo: #fef3c7;
+  --peligro: #b91c1c;
+  --peligro-fondo: #fee2e2;
+  --fuera: #475569;
+  --fuera-fondo: #e2e8f0;
+  --info: #0369a1;
+  --info-fondo: #e0f2fe;
+
+  /* --- Medidas --- */
+  --barra-ancho: 250px;
+  --radio: 10px;
+  --radio-chico: 6px;
+  --sombra: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --sombra-alta: 0 10px 30px rgba(15, 23, 42, 0.14);
+  --alto-fila: 52px;
+
+  --fuente: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --fuente-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* --- Reinicio --- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--fuente);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--texto);
+  background: var(--fondo);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 650; line-height: 1.25; letter-spacing: -0.01em; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; }
+p { margin: 0 0 0.75rem; }
+a { color: var(--marca); text-decoration: none; }
+a:hover { text-decoration: underline; }
+button, input, select, textarea { font: inherit; color: inherit; }
+img { max-width: 100%; display: block; }
+
+[hidden] { display: none !important; }
+
+/* Solo para lectores de pantalla: hace falta para etiquetas y avisos. */
+.solo-lectores {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================================================
+   Estructura
+   ============================================================================ */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--barra-ancho) 1fr;
+  min-height: 100vh;
+}
+
+/* --- Barra lateral --- */
+.barra {
+  background: var(--marca-oscura);
+  color: #e8edf7;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.barra__marca {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 1.1rem 1.15rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.barra__logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.12);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #fff;
+}
+
+.barra__logo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+
+.barra__nombre {
+  font-weight: 650;
+  font-size: 0.92rem;
+  color: #fff;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.barra__producto {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 0.15rem;
+}
+
+.barra__nav { padding: 0.75rem 0.6rem; flex: 1; }
+
+.barra__grupo {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.38);
+  padding: 0.9rem 0.55rem 0.35rem;
+  font-weight: 600;
+}
+
+.barra__enlace {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.65rem;
+  border-radius: var(--radio-chico);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.barra__enlace:hover { background: rgba(255, 255, 255, 0.08); color: #fff; text-decoration: none; }
+.barra__enlace[aria-current='page'] { background: var(--marca); color: var(--texto-sobre-marca); font-weight: 600; }
+.barra__enlace svg { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.9; }
+.barra__enlace[aria-current='page'] svg { opacity: 1; }
+
+.barra__insignia {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.1rem 0.42rem;
+  border-radius: 99px;
+  min-width: 1.35rem;
+  text-align: center;
+}
+.barra__insignia--alerta { background: #dc2626; }
+
+.barra__pie {
+  padding: 0.85rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+.barra__usuario { color: #fff; font-weight: 600; display: block; }
+.barra__salir {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.45rem;
+  border-radius: var(--radio-chico);
+  background: rgba(255, 255, 255, 0.1);
+  border: 0;
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.barra__salir:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* --- Area de trabajo --- */
+.trabajo { display: flex; flex-direction: column; min-width: 0; }
+
+.cabecera {
+  background: var(--superficie);
+  border-bottom: 1px solid var(--borde);
+  padding: 0.9rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.cabecera__titulo { flex: 1; min-width: 0; }
+.cabecera__titulo h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cabecera__sub { color: var(--texto-suave); font-size: 0.83rem; }
+.cabecera__acciones { display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0; }
+
+.contenido { padding: 1.4rem 1.5rem 3rem; flex: 1; max-width: 1500px; width: 100%; }
+
+/* Aviso de licencia: franja arriba, no un modal que estorbe. */
+.aviso-licencia {
+  background: var(--pendiente-fondo);
+  border-bottom: 1px solid #fcd34d;
+  color: #78350f;
+  padding: 0.6rem 1.5rem;
+  font-size: 0.86rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.aviso-licencia--peligro { background: var(--peligro-fondo); border-color: #fca5a5; color: #7f1d1d; }
+.aviso-licencia svg { width: 17px; height: 17px; flex-shrink: 0; }
+
+/* ============================================================================
+   Componentes
+   ============================================================================ */
+
+/* --- Tarjetas --- */
+.tarjeta {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  box-shadow: var(--sombra);
+}
+.tarjeta__cabecera {
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--borde);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.tarjeta__cabecera h2, .tarjeta__cabecera h3 { flex: 1; }
+.tarjeta__cuerpo { padding: 1.1rem; }
+.tarjeta__pie { padding: 0.85rem 1.1rem; border-top: 1px solid var(--borde); background: var(--superficie-2); border-radius: 0 0 var(--radio) var(--radio); }
+
+/* --- Rejillas --- */
+.rejilla { display: grid; gap: 1rem; }
+.rejilla--metricas { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.rejilla--2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.rejilla--3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.rejilla--panel { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: start; }
+
+/* --- Metrica --- */
+.metrica {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--sombra);
+}
+.metrica__etiqueta {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--texto-suave);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.metrica__valor { font-size: 1.9rem; font-weight: 700; line-height: 1.15; margin-top: 0.3rem; letter-spacing: -0.02em; }
+.metrica__nota { font-size: 0.8rem; color: var(--texto-suave); margin-top: 0.15rem; }
+.metrica--alerta { border-color: #fcd34d; background: #fffbeb; }
+.metrica--alerta .metrica__valor { color: var(--pendiente); }
+.metrica--peligro { border-color: #fca5a5; background: #fef2f2; }
+.metrica--peligro .metrica__valor { color: var(--peligro); }
+.metrica--bien .metrica__valor { color: var(--dentro); }
+
+/* --- Botones --- */
+.boton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  border-radius: var(--radio-chico);
+  border: 1px solid transparent;
+  background: var(--marca);
+  color: var(--texto-sobre-marca);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.12s ease, background 0.12s ease;
+}
+.boton:hover { filter: brightness(1.08); text-decoration: none; }
+.boton:active { filter: brightness(0.95); }
+.boton:disabled, .boton[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; filter: none; }
+.boton svg { width: 17px; height: 17px; }
+
+.boton--secundario { background: var(--superficie); color: var(--texto); border-color: var(--borde-fuerte); }
+.boton--secundario:hover { background: var(--superficie-2); }
+.boton--fantasma { background: transparent; color: var(--texto-suave); }
+.boton--fantasma:hover { background: var(--superficie-2); color: var(--texto); }
+.boton--peligro { background: var(--peligro); color: #fff; }
+.boton--exito { background: var(--dentro); color: #fff; }
+.boton--grande { padding: 0.8rem 1.5rem; font-size: 1rem; }
+.boton--chico { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+.boton--bloque { width: 100%; }
+
+/* --- Formularios --- */
+.campo { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.85rem; }
+.campo__etiqueta { font-size: 0.82rem; font-weight: 600; color: var(--texto); }
+.campo__etiqueta .req { color: var(--peligro); }
+.campo__ayuda { font-size: 0.78rem; color: var(--texto-suave); }
+.campo__error { font-size: 0.78rem; color: var(--peligro); font-weight: 600; }
+
+.entrada, .selector, .area {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--borde-fuerte);
+  border-radius: var(--radio-chico);
+  background: var(--superficie);
+  font-size: 0.92rem;
+}
+.entrada:focus, .selector:focus, .area:focus {
+  outline: 2px solid var(--marca);
+  outline-offset: -1px;
+  border-color: var(--marca);
+}
+.entrada[readonly] { background: var(--superficie-2); color: var(--texto-suave); }
+.entrada--grande { font-size: 1.15rem; padding: 0.7rem 0.85rem; font-weight: 600; letter-spacing: 0.04em; }
+.entrada--error { border-color: var(--peligro); }
+.area { min-height: 76px; resize: vertical; }
+.entrada--mono { font-family: var(--fuente-mono); font-size: 0.84rem; }
+
+.campo--interruptor { flex-direction: row; align-items: center; gap: 0.6rem; }
+.interruptor { width: 1.15rem; height: 1.15rem; accent-color: var(--marca); cursor: pointer; flex-shrink: 0; }
+
+.fila-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0 0.9rem; }
+.fila-campos--3 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+
+.barra-acciones { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.barra-acciones--fin { justify-content: flex-end; }
+
+/* Buscador con icono */
+.buscador { position: relative; flex: 1; max-width: 380px; }
+.buscador svg { position: absolute; left: 0.6rem; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--texto-tenue); pointer-events: none; }
+.buscador .entrada { padding-left: 2.1rem; }
+
+/* --- Tablas --- */
+.tabla-envoltura { overflow-x: auto; }
+.tabla { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.tabla th {
+  text-align: left;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--texto-suave);
+  font-weight: 700;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--borde);
+  background: var(--superficie-2);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+.tabla td { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--borde); vertical-align: middle; }
+.tabla tbody tr:hover { background: var(--superficie-2); }
+.tabla tbody tr:last-child td { border-bottom: 0; }
+.tabla__principal { font-weight: 600; }
+.tabla__secundario { font-size: 0.8rem; color: var(--texto-suave); }
+.tabla__acciones { display: flex; gap: 0.35rem; justify-content: flex-end; }
+.tabla__numero { text-align: right; font-variant-numeric: tabular-nums; }
+.tabla--compacta td { padding: 0.45rem 0.7rem; }
+
+/* --- Etiquetas de estado --- */
+.etiqueta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+  font-size: 0.76rem;
+  font-weight: 650;
+  white-space: nowrap;
+  background: var(--fuera-fondo);
+  color: var(--fuera);
+}
+.etiqueta--dentro { background: var(--dentro-fondo); color: var(--dentro); }
+.etiqueta--pendiente { background: var(--pendiente-fondo); color: var(--pendiente); }
+.etiqueta--peligro { background: var(--peligro-fondo); color: var(--peligro); }
+.etiqueta--info { background: var(--info-fondo); color: var(--info); }
+.etiqueta--marca { background: var(--marca-clara); color: var(--marca); }
+.etiqueta--punto::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* --- Avisos --- */
+.aviso {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radio-chico);
+  border: 1px solid var(--borde);
+  background: var(--superficie-2);
+  font-size: 0.88rem;
+  margin-bottom: 0.7rem;
+}
+.aviso svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 0.1rem; }
+.aviso--info { background: var(--info-fondo); border-color: #bae6fd; color: #075985; }
+.aviso--aviso { background: var(--pendiente-fondo); border-color: #fcd34d; color: #78350f; }
+.aviso--peligro { background: var(--peligro-fondo); border-color: #fca5a5; color: #7f1d1d; }
+.aviso--exito { background: var(--dentro-fondo); border-color: #86efac; color: #14532d; }
+.aviso strong { font-weight: 700; }
+
+/* --- Estado vacio: ensena que hacer, no deja un hueco --- */
+.vacio { text-align: center; padding: 2.5rem 1.5rem; color: var(--texto-suave); }
+.vacio__icono {
+  width: 46px; height: 46px;
+  margin: 0 auto 0.85rem;
+  border-radius: 50%;
+  background: var(--superficie-2);
+  border: 1px solid var(--borde);
+  display: grid;
+  place-items: center;
+  color: var(--texto-tenue);
+}
+.vacio__icono svg { width: 22px; height: 22px; }
+.vacio h3 { color: var(--texto); margin-bottom: 0.3rem; }
+.vacio p { max-width: 42ch; margin: 0 auto 0.9rem; font-size: 0.88rem; }
+
+/* --- Cargando --- */
+.cargando { display: flex; align-items: center; justify-content: center; gap: 0.6rem; padding: 2.5rem; color: var(--texto-suave); font-size: 0.9rem; }
+.girador {
+  width: 18px; height: 18px;
+  border: 2px solid var(--borde-fuerte);
+  border-top-color: var(--marca);
+  border-radius: 50%;
+  animation: girar 0.7s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* Esqueleto mientras carga: evita el salto de la pagina. */
+.esqueleto {
+  background: linear-gradient(90deg, var(--superficie-2) 25%, var(--borde) 50%, var(--superficie-2) 75%);
+  background-size: 200% 100%;
+  animation: brillo 1.3s ease-in-out infinite;
+  border-radius: var(--radio-chico);
+  height: 1rem;
+  margin-bottom: 0.5rem;
+}
+@keyframes brillo { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ============================================================================
+   Acceso
+   ============================================================================ */
+
+.acceso {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(1100px 500px at 15% -10%, var(--marca-clara), transparent 60%),
+    var(--fondo);
+}
+.acceso__caja { width: 100%; max-width: 420px; }
+.acceso__marca { text-align: center; margin-bottom: 1.5rem; }
+.acceso__logo {
+  width: 62px; height: 62px;
+  margin: 0 auto 0.85rem;
+  border-radius: 15px;
+  background: var(--marca);
+  color: var(--texto-sobre-marca);
+  display: grid;
+  place-items: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  overflow: hidden;
+  box-shadow: var(--sombra-alta);
+}
+.acceso__logo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.acceso__titulo { font-size: 1.35rem; }
+.acceso__sub { color: var(--texto-suave); font-size: 0.88rem; }
+.acceso__pie { text-align: center; margin-top: 1rem; font-size: 0.82rem; color: var(--texto-suave); }
+
+/* ============================================================================
+   Registro de visitante
+   ============================================================================ */
+
+.registro { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 1rem; align-items: start; }
+
+.campo-cedula { display: flex; gap: 0.6rem; align-items: stretch; }
+.campo-cedula .entrada { flex: 1; }
+
+.ficha { position: sticky; top: 5rem; }
+
+.ficha__persona { padding: 1.1rem; border-bottom: 1px solid var(--borde); }
+.ficha__nombre { font-size: 1.15rem; font-weight: 700; line-height: 1.25; }
+.ficha__cedula { font-family: var(--fuente-mono); color: var(--texto-suave); font-size: 0.9rem; margin-top: 0.15rem; }
+.ficha__datos { padding: 1.1rem; display: grid; gap: 0.7rem; }
+.ficha__dato { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.88rem; }
+.ficha__dato dt { color: var(--texto-suave); }
+.ficha__dato dd { margin: 0; font-weight: 600; text-align: right; }
+
+.verificado {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: var(--dentro);
+  background: var(--dentro-fondo);
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+}
+.verificado--no { color: var(--pendiente); background: var(--pendiente-fondo); }
+
+/* Ficha marcada por la lista de vigilancia */
+.ficha--bloqueado { border-color: #fca5a5; box-shadow: 0 0 0 3px var(--peligro-fondo); }
+.ficha--observado { border-color: #fcd34d; box-shadow: 0 0 0 3px var(--pendiente-fondo); }
+
+.lista-vigilancia { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; }
+.lista-vigilancia li { margin-bottom: 0.4rem; }
+.lista-vigilancia strong { font-weight: 700; }
+
+/* Resultados de busqueda por nombre */
+.resultados { max-height: 320px; overflow-y: auto; }
+.resultado {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--borde);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-left: 0; border-right: 0; border-top: 0;
+}
+.resultado:hover { background: var(--superficie-2); }
+.resultado__nombre { font-weight: 600; font-size: 0.9rem; }
+.resultado__meta { font-size: 0.8rem; color: var(--texto-suave); }
+
+/* ============================================================================
+   Gafete
+   ============================================================================ */
+
+.gafete-envoltura { display: grid; place-items: center; padding: 1.5rem; background: var(--superficie-2); border-radius: var(--radio); }
+
+.gafete {
+  width: var(--gafete-ancho, 340px);
+  min-height: var(--gafete-alto, 214px);
+  background: var(--gafete-fondo, #fff);
+  color: var(--gafete-texto, var(--texto));
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--sombra-alta);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.84rem;
+}
+.gafete__franja {
+  background: var(--gafete-marca);
+  color: var(--gafete-sobre-marca);
+  padding: 0.7rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.gafete__logo { width: 34px; height: 34px; border-radius: 6px; background: rgba(255, 255, 255, 0.2); display: grid; place-items: center; overflow: hidden; flex-shrink: 0; font-weight: 700; }
+.gafete__logo img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.gafete__institucion { font-weight: 700; font-size: 0.9rem; line-height: 1.2; }
+.gafete__tipo { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.85; }
+.gafete__cuerpo { padding: 0.9rem; display: flex; gap: 0.85rem; flex: 1; }
+.gafete__principal { flex: 1; min-width: 0; }
+.gafete__nombre { font-size: 1.05rem; font-weight: 700; line-height: 1.2; }
+.gafete__cedula { font-family: var(--fuente-mono); font-size: 0.82rem; color: var(--texto-suave); }
+.gafete__lineas { margin-top: 0.6rem; display: grid; gap: 0.28rem; }
+.gafete__linea { display: flex; gap: 0.4rem; font-size: 0.78rem; }
+.gafete__linea span:first-child { color: var(--texto-suave); min-width: 5.2rem; }
+.gafete__linea span:last-child { font-weight: 600; }
+.gafete__codigos { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.gafete__qr { width: 96px; height: 96px; }
+.gafete__qr svg { width: 100%; height: 100%; }
+.gafete__barras { width: 100%; }
+.gafete__barras svg { width: 100%; height: auto; }
+.gafete__codigo { font-family: var(--fuente-mono); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; }
+.gafete__pie { padding: 0.5rem 0.9rem; border-top: 1px dashed var(--borde); font-size: 0.72rem; color: var(--texto-suave); display: flex; justify-content: space-between; gap: 0.6rem; }
+
+/* ============================================================================
+   Impresión del gafete
+
+   La impresión NO se hace desde esta pantalla: se abre una ventana aparte que
+   contiene SOLO el gafete y su propia regla @page (ver VF.gafete.imprimir en
+   paginas-3.js). Esa ventana es la que va a la impresora.
+
+   Por qué una ventana aparte y no imprimir la pantalla:
+
+     1. El tamaño de la página tiene que estar en el documento ANTES de
+        imprimir, y eso desde aquí no se puede garantizar (vea la nota de más
+        abajo, con lo que se comprobó).
+     2. En la ventana no hay barra lateral, ni avisos, ni diálogos: no hay nada
+        que ocultar. Las reglas de "esconder cosas al imprimir" son justo donde
+        se cuelan los errores.
+     3. Se pueden sacar varias copias sin tocar la pantalla.
+
+   Lo que sigue es el respaldo: si alguien imprime esta pantalla con Ctrl+P en
+   vez de usar el botón, sale el gafete y no el resto de la aplicación.
+   ============================================================================ */
+
+@media print {
+  body { background: #fff; }
+
+  /* Fuera todo lo que no es el gafete. Si no, el navegador imprime también la
+     barra lateral, la cabecera y los avisos. */
+  .barra,
+  .cabecera,
+  .no-imprimir,
+  .aviso-licencia,
+  .dialogo__cabecera,
+  .dialogo__pie,
+  .aviso,
+  .migas { display: none !important; }
+
+  .app { display: block; }
+  .contenido { padding: 0; }
+
+  /* El diálogo deja de ser un diálogo: en papel no hay ventanas emergentes.
+     Sin esto el gafete sale recortado o con la sombra del modal encima. */
+  .dialogo {
+    position: static !important;
+    max-width: none !important;
+    width: auto !important;
+    margin: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .dialogo::backdrop { display: none !important; }
+  .dialogo__cuerpo {
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  /* La envoltura solo existe para centrar la vista previa en pantalla. Al
+     imprimir se neutraliza, y NO se oculta: el gafete va dentro de ella. Por eso
+     la regla "no-imprimir" se exceptúa aquí: como las dos tienen !important,
+     ganaría la de más abajo y el gafete no saldría en el papel. */
+  .gafete-envoltura,
+  .gafete-envoltura.no-imprimir {
+    background: none !important;
+    padding: 0 !important;
+    display: block !important;
+    place-items: initial !important;
+    border-radius: 0 !important;
+  }
+
+  .gafete {
+    box-shadow: none !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .tarjeta { border: 0; box-shadow: none; }
+
+  /* En papel no tiene sentido el borde de referencia que separa el gafete del
+     fondo: sobre una etiqueta ya impresa se ve la línea. */
+  .gafete { border: 0 !important; }
+}
+
+/* ---------------------------------------------------------------------------
+   El tamaño de página NO se declara aquí, y es a propósito.
+
+   Comprobado con Chrome, imprimiendo a PDF y midiendo el resultado:
+
+     - Un @page sin condiciones vale para todos los formatos, así que no sirve
+       para distinguir A4 de etiqueta térmica.
+     - Condicionarlo con una clase del body (body.imp-termica { size: ... })
+       NO funciona: Chrome lo ignora y el PDF sale en A4.
+     - Condicionarlo con :has() tampoco funciona.
+     - Lo que SÍ funciona: que la regla esté en el documento ANTES de
+       imprimir, o inyectarla con un retardo antes de llamar a print().
+
+   Por eso la impresión se hace en una ventana aparte que trae su propio @page
+   escrito en el <head> desde el principio (ver VF.gafete.imprimir en
+   paginas-3.js). Si alguien imprime esta pantalla con Ctrl+P en vez de usar el
+   botón, sale en A4 con el gafete encima, que es un resultado razonable.
+   --------------------------------------------------------------------------- */
+/* ============================================================================
+   Hoja de impresión (la ventana aparte)
+
+   Aquí solo va lo que NO está ya en app.css: cómo se coloca el gafete en la
+   hoja. El aspecto del gafete lo sigue poniendo app.css, que la ventana también
+   carga. Así no hay dos definiciones del mismo diseño que se puedan separar.
+   ============================================================================ */
+
+body.vf-hoja {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  display: block;
+}
+
+/* Una hoja por gafete, centrado. */
+.vf-hoja__pagina {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* En la térmica no hay hoja: el gafete ES la página, así que no hay bordes ni
+   esquinas que redondear. */
+body.vf-hoja--termica .vf-hoja__pagina { padding: 0; }
+body.vf-hoja--termica .gafete,
+body.vf-hoja--termica .gafete__franja {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.vf-hoja .gafete {
+  box-shadow: none;
+  border: 0;
+  margin: 0;
+}
+
+/* Aviso para quien abra la vista previa en el navegador. En la ventana de
+   impresión no se ve: esa solo lleva el gafete. */
+.vf-hoja__nota {
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  color: #475569;
+  text-align: center;
+  padding: 10px;
+}
+
+/* ============================================================================
+   Dialogos
+   ============================================================================ */
+
+.dialogo {
+  border: 0;
+  border-radius: var(--radio);
+  padding: 0;
+  box-shadow: var(--sombra-alta);
+  max-width: min(620px, 92vw);
+  width: 100%;
+}
+.dialogo::backdrop { background: rgba(15, 23, 42, 0.5); }
+.dialogo__cabecera { padding: 1rem 1.2rem; border-bottom: 1px solid var(--borde); display: flex; align-items: center; gap: 0.75rem; }
+.dialogo__cabecera h2 { flex: 1; }
+.dialogo__cuerpo { padding: 1.2rem; max-height: 70vh; overflow-y: auto; }
+.dialogo__pie { padding: 0.9rem 1.2rem; border-top: 1px solid var(--borde); display: flex; justify-content: flex-end; gap: 0.6rem; background: var(--superficie-2); }
+
+/* --- Pestanas --- */
+.pestanas { display: flex; gap: 0.2rem; border-bottom: 1px solid var(--borde); margin-bottom: 1.2rem; overflow-x: auto; }
+.pestana {
+  padding: 0.6rem 0.95rem;
+  border: 0;
+  background: none;
+  color: var(--texto-suave);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.pestana:hover { color: var(--texto); }
+.pestana[aria-selected='true'] { color: var(--marca); border-bottom-color: var(--marca); }
+
+/* --- Aviso flotante --- */
+.avisos-flotantes {
+  position: fixed;
+  bottom: 1.2rem;
+  right: 1.2rem;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: min(400px, calc(100vw - 2.4rem));
+}
+.flotante {
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-left: 4px solid var(--marca);
+  border-radius: var(--radio-chico);
+  box-shadow: var(--sombra-alta);
+  padding: 0.75rem 0.9rem;
+  font-size: 0.89rem;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  animation: entrar 0.18s ease-out;
+}
+@keyframes entrar { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.flotante--exito { border-left-color: var(--dentro); }
+.flotante--peligro { border-left-color: var(--peligro); }
+.flotante--aviso { border-left-color: var(--pendiente); }
+.flotante strong { display: block; }
+.flotante__cerrar { margin-left: auto; border: 0; background: none; cursor: pointer; color: var(--texto-tenue); font-size: 1.1rem; line-height: 1; padding: 0 0.2rem; }
+
+/* ============================================================================
+   Graficos (SVG propio, sin librerias)
+   ============================================================================ */
+
+.grafico { width: 100%; }
+.grafico svg { width: 100%; height: auto; display: block; overflow: visible; }
+.grafico__barra { fill: var(--marca); transition: opacity 0.12s ease; }
+.grafico__barra:hover { opacity: 0.75; }
+.grafico__barra--suave { fill: var(--marca-acento); }
+.grafico__eje { stroke: var(--borde); stroke-width: 1; }
+.grafico__texto { font-size: 10px; fill: var(--texto-suave); font-family: var(--fuente); }
+.grafico__valor { font-size: 10px; font-weight: 700; fill: var(--texto); font-family: var(--fuente); }
+.grafico__linea { fill: none; stroke: var(--marca); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.grafico__area { fill: var(--marca-clara); opacity: 0.7; }
+.grafico__punto { fill: var(--marca); }
+
+.barras-h { display: grid; gap: 0.5rem; }
+.barras-h__fila { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
+.barras-h__etiqueta { color: var(--texto-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barras-h__pista { background: var(--superficie-2); border-radius: 99px; height: 20px; overflow: hidden; }
+.barras-h__valor { background: var(--marca); height: 100%; border-radius: 99px; min-width: 3px; }
+.barras-h__numero { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+
+/* ============================================================================
+   Utilidades
+   ============================================================================ */
+
+.mt-0 { margin-top: 0; }
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.mb-0 { margin-bottom: 0; }
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-3 { margin-bottom: 1.5rem; }
+.texto-suave { color: var(--texto-suave); }
+.texto-tenue { color: var(--texto-tenue); }
+.texto-chico { font-size: 0.82rem; }
+.texto-chico-2 { font-size: 0.78rem; }
+.texto-mono { font-family: var(--fuente-mono); }
+.texto-derecha { text-align: right; }
+.texto-centro { text-align: center; }
+.negrita { font-weight: 700; }
+.fila { display: flex; align-items: center; gap: 0.6rem; }
+.fila--separada { justify-content: space-between; }
+.fila--envuelve { flex-wrap: wrap; }
+.crecer { flex: 1; min-width: 0; }
+.oculto { display: none !important; }
+
+@media (max-width: 1100px) {
+  .rejilla--panel { grid-template-columns: 1fr; }
+  .registro { grid-template-columns: 1fr; }
+  .ficha { position: static; }
+}
+
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .barra {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    padding: 0.4rem;
+  }
+  .barra__marca { border: 0; padding: 0.4rem 0.7rem; flex-shrink: 0; }
+  .barra__nombre, .barra__producto, .barra__grupo { display: none; }
+  .barra__nav { display: flex; gap: 0.2rem; padding: 0; flex: 1; }
+  .barra__enlace { width: auto; padding: 0.5rem 0.7rem; }
+  .barra__enlace span { display: none; }
+  .barra__pie { border: 0; padding: 0.4rem; white-space: nowrap; }
+  .barra__usuario { display: none; }
+  .contenido { padding: 1rem; }
+  .cabecera { padding: 0.75rem 1rem; }
+}

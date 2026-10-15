@@ -1,0 +1,276 @@
+# ============================================================================
+# VisitaFlow - Despliegue en el VPS (Dokploy)
+# ----------------------------------------------------------------------------
+# Dokploy levanta esto con "Docker Compose". Trae tres servicios:
+#
+#   bd-sistema   SQL Server con la base del sistema y la base de cedulas
+#   licencias    servidor de licencias (emision y renovacion)
+#   app          el sistema de visitantes
+#
+# IMPORTANTE SOBRE LA BASE DE CEDULAS
+# -----------------------------------
+# La base de cedulas del padron ligero son unos 800 MB. NO se descarga por
+# Internet: hay que SUBIRLA al VPS una vez (con el comando que esta al final de
+# este archivo, en las notas) y montarla como volumen. El montaje esta comentado
+# mas abajo, listo para descomentar cuando el archivo este en el servidor.
+#
+# ANTES DE LEVANTAR
+# -----------------
+# En Dokploy: cree la aplicacion con tipo "Docker Compose", apunte al
+# repositorio y, en la pestana Environment, pegue estas variables. Dokploy las
+# escribe en un .env junto al compose y Compose las lee solo:
+#
+#      CLAVE_SQL          clave del usuario sa (invente una larga)
+#      JWT_SECRET         secreto de las sesiones
+#      ADMIN_TOKEN        protege la consola de licencias
+#      LICENCIA_LLAVE_PRIVADA_B64   su llave privada, en base64
+#      LICENCIA_LLAVE_PUBLICA_B64   su llave publica, en base64
+#      URL_PUBLICA        https://visitas.su-dominio.com
+#
+# Ninguna de estas cinco es opcional: el compose usa ${VAR:?...} en las que no
+# tienen valor por defecto, asi que si falta una el despliegue se detiene con un
+# mensaje que dice cual. Es a proposito: mejor fallar al desplegar que arrancar
+# con un secreto vacio.
+#
+# 2. Genere las llaves en su maquina con:  npm run keys:gen
+#    y conviertalas a base64 (vea las notas al final del archivo).
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # Base de datos
+  # --------------------------------------------------------------------------
+  bd-sistema:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: visitaflow-bd
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_SA_PASSWORD: ${CLAVE_SQL:?Defina CLAVE_SQL en el archivo .env}
+      MSSQL_PID: Express
+      TZ: America/Santo_Domingo
+      # SQL Server EXPRESS tiene un tope duro de 1410 MB de memoria de buffer,
+      # use la que use el contenedor. Se le pone el tope explicito por dos
+      # razones: no reserva memoria que no puede aprovechar, y no deja al
+      # contenedor creciendo hasta el limite del VPS.
+      MSSQL_MEMORY_LIMIT_MB: '1400'
+    volumes:
+      # OJO, ESTE ES EL FALLO MAS COMUN DE ESTE DESPLIEGUE:
+      # el contenedor de SQL Server corre con el usuario 10001 (mssql), no como
+      # root. Si el volumen queda a nombre de root, la base NO ARRANCA y el log
+      # dice "Directory /var/opt/mssql/data is not writable".
+      #
+      # Con volumenes CON NOMBRE, como este, Docker copia los permisos de la
+      # imagen y funciona. Si alguna vez usa una carpeta del host en su lugar,
+      # prepare el permiso antes:
+      #
+      #   mkdir -p ./datos-sql && sudo chown -R 10001:0 ./datos-sql
+      #
+      - datos-sql:/var/opt/mssql
+      # Para subir el padron ligero ya construido (.bak), descomente y ponga
+      # ahi el archivo. Vea las notas al final.
+      # - ./respaldo-padron:/respaldo:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+    # El limite del contenedor deja margen sobre los 1400 MB del motor, para el
+    # sistema operativo y las herramientas. Con esto el despliegue entra comodo
+    # en un VPS de 4 GB.
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  # --------------------------------------------------------------------------
+  # Servidor de licencias (el unico que tiene la llave privada)
+  # --------------------------------------------------------------------------
+  licencias:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visitaflow-licencias
+    restart: unless-stopped
+    command: ['node', 'server-licencias.js']
+    environment:
+      NODE_ENV: production
+      PUERTO_LICENCIAS: '4100'
+      HOST: 0.0.0.0
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Defina ADMIN_TOKEN en el archivo .env}
+      LICENCIA_LLAVE_PRIVADA_B64: ${LICENCIA_LLAVE_PRIVADA_B64:?Defina LICENCIA_LLAVE_PRIVADA_B64}
+      LICENCIA_LLAVE_PUBLICA_B64: ${LICENCIA_LLAVE_PUBLICA_B64:?Defina LICENCIA_LLAVE_PUBLICA_B64}
+      LICENCIAS_REGISTRO: /app/datos/licencias-emitidas.json
+      TZ: America/Santo_Domingo
+    volumes:
+      - datos-licencias:/app/datos
+    expose:
+      - '4100'
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:4100/api/salud']
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 20s
+
+  # --------------------------------------------------------------------------
+  # Sistema de visitantes
+  # --------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visitaflow-app
+    restart: unless-stopped
+    command: ['node', 'server.js']
+    depends_on:
+      bd-sistema:
+        condition: service_healthy
+      licencias:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      HOST: 0.0.0.0
+      DETRAS_DE_PROXY: '1'
+      # La direccion publica se rellena en Dokploy con el dominio real.
+      URL_PUBLICA: ${URL_PUBLICA:-http://localhost:3000}
+
+      # Base del sistema
+      DB_SERVER: bd-sistema
+      DB_PORT: '1433'
+      DB_USER: sa
+      DB_PASSWORD: ${CLAVE_SQL:?Defina CLAVE_SQL en el archivo .env}
+      DB_DATABASE: VisitaFlow
+      DB_ENCRYPT: '0'
+      DB_TRUST_CERT: '1'
+
+      # Base de cedulas (solo lectura, sin fotografias)
+      PADRON_ACTIVO: ${PADRON_ACTIVO:-1}
+      PADRON_DB_SERVER: bd-sistema
+      PADRON_DB_PORT: '1433'
+      PADRON_DB_USER: sa
+      PADRON_DB_PASSWORD: ${CLAVE_SQL}
+      PADRON_DATABASE: PadronLigero
+      PADRON_TABLA: dbo.CIUDADANOS
+      PADRON_MS_ESPERA: '15000'
+      IDENTIDAD_EXIGIR_EN_PADRON: ${IDENTIDAD_EXIGIR_EN_PADRON:-0}
+
+      # Seguridad
+      JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET en el archivo .env}
+      JWT_EXPIRA: 12h
+
+      # Licencia: cada institucion apunta a su servidor de licencias.
+      LICENCIA_ARCHIVO: /app/datos/licencia.vflow
+      LICENCIA_SERVIDOR: http://licencias:4100
+      LICENCIA_LLAVE_PUBLICA_B64: ${LICENCIA_LLAVE_PUBLICA_B64}
+      LICENCIA_DIAS_AVISO: '30'
+
+      # Archivos subidos (logos de cada institucion)
+      ARCHIVOS_CARPETA: /app/datos/archivos
+
+      # Correo (opcional)
+      CORREO_ACTIVO: ${CORREO_ACTIVO:-0}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      MAIL_FROM: ${MAIL_FROM:-VisitaFlow <no-responder@visitaflow.local>}
+
+      AUDITORIA_ACTIVA: '1'
+      TZ: America/Santo_Domingo
+    volumes:
+      - datos-app:/app/datos
+    expose:
+      - '3000'
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:3000/api/salud']
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  datos-sql:
+  datos-licencias:
+  datos-app:
+
+# ============================================================================
+# NOTAS
+# ============================================================================
+#
+# --- Como se publica en Internet -------------------------------------------
+# En Dokploy, a los servicios "app" y "licencias" se les asigna un dominio en la
+# pestana Domains y el puerto interno (3000 y 4100). Dokploy pone el Traefik con
+# el certificado HTTPS delante; no hay que tocar nginx.
+#
+# Conviene NO publicar el servidor de licencias en Internet abierto. Lo ideal es
+# dejarlo solo en la red interna (ya esta en la red de Compose) y administrarlo
+# por tunel SSH o por VPN.
+#
+# --- Como subir la base de cedulas (una sola vez) --------------------------
+# En su maquina, con la base PadronLigero ya construida:
+#
+#   sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q ^
+#     "BACKUP DATABASE PadronLigero TO DISK = 'C:\TempSQL\PadronLigero.bak' WITH COMPRESSION"
+#
+# Luego, del lado del VPS:
+#
+#   scp PadronLigero.bak usuario@su-vps:/ruta/del/proyecto/respaldo-padron/
+#
+# Descomente la linea del volumen ./respaldo-padron en el servicio bd-sistema y
+# entre al contenedor para restaurar:
+#
+#   docker compose up -d bd-sistema
+#   docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q ^
+#     "RESTORE DATABASE PadronLigero FROM DISK = '/respaldo/PadronLigero.bak' WITH MOVE 'PadronLigero' TO '/var/opt/mssql/data/PadronLigero.mdf', MOVE 'PadronLigero_log' TO '/var/opt/mssql/data/PadronLigero_log.ldf'"
+#
+# Despues se crea la vista de ciudadanos:
+#
+#   docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js
+#
+# --- Como preparar la base del sistema -------------------------------------
+# La primera vez, despues de levantar:
+#
+#   docker exec -it visitaflow-app node sql/01-crear.js
+#   docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js
+#   docker compose restart app
+#
+# NO hace falta emitir ninguna licencia a mano: el sistema arranca sin licencia
+# y muestra la pantalla de activacion. Se pega ahi el archivo .vflow del cliente
+# y el propio sistema crea la institucion, sus catalogos y el administrador.
+#
+# La clave del administrador inicial queda DENTRO del volumen, en
+# /app/datos/CLAVE-ADMINISTRADOR.txt, y se lee con:
+#
+#   docker exec -it visitaflow-app cat /app/datos/CLAVE-ADMINISTRADOR.txt
+#
+# Si esa clave se pierde, se restablece sin tocar la base:
+#
+#   docker exec -it visitaflow-app node scripts/restablecer-admin.js junta-los-prados
+#
+# --- Copias de seguridad ---------------------------------------------------
+# El respaldo lo escribe SQL Server, no la aplicacion. La carpeta de la instancia
+# (/var/opt/mssql/backup) es parte del volumen de datos, asi que sobrevive:
+#
+#   docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q ^
+#     "BACKUP DATABASE VisitaFlow TO DISK = '/var/opt/mssql/backup/VisitaFlow.bak' WITH COMPRESSION"
+#
+# Y se saca del servidor con:
+#
+#   docker cp visitaflow-bd:/var/opt/mssql/backup/VisitaFlow.bak .
+#
+# Conviene bajarla a su maquina: un volumen que solo vive en el VPS no es una
+# copia de seguridad, es el mismo disco.
+#
+# --- Como convertir las llaves a base64 ------------------------------------
+# En PowerShell:
+#
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes("licencias-keys\privada.pem"))
+#   [Convert]::ToBase64String([IO.File]::ReadAllBytes("licencias-keys\publica.pem"))
+#
+# Guarde esos dos valores en .env como LICENCIA_LLAVE_PRIVADA_B64 y
+# LICENCIA_LLAVE_PUBLICA_B64. El archivo .env NO se sube al repositorio.

@@ -1,0 +1,42 @@
+# Archivos que NO van dentro de la imagen ni al repositorio.
+#
+# Lo mas importante: las llaves del licenciamiento y los archivos de entorno no
+# viajan dentro de la imagen. Si la llave privada terminara en una imagen, CUALQUIERA
+# que la descargue podria emitir licencias validas.
+
+# --- Secretos y configuracion local ---
+.env
+.env.*
+!.env.example
+licencia.vflow
+licencias-keys/
+*.pem
+*.key
+CLAVE-ADMINISTRADOR.txt
+
+# --- Datos que no son codigo ---
+datos/
+capturas/
+tmp/
+docs/
+*.log
+
+# --- Lo que se instala o se genera solo ---
+node_modules
+package-lock.json.bak
+
+# --- Control de versiones y herramientas ---
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Documentos de trabajo ---
+# No hacen falta dentro de la imagen: son para quien administra el sistema, y se
+# leen desde el repositorio.
+PRODUCT.md
+DESIGN.md
+DESPLIEGUE.md
