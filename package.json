@@ -20,7 +20,7 @@
     "test:primer-arranque": "node scripts/probar-primer-arranque.js",
     "test:impresion": "node scripts/probar-impresion.js",
     "test:personas": "node sql/95-pruebas-personas.js",
-    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:secretos && npm run test:instalador && npm run test:despliegue && npm run test:esquema && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
+    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:secretos && npm run test:vigilancia && npm run test:instalador && npm run test:despliegue && npm run test:esquema && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
     "respaldo": "node scripts/respaldo.js",
     "respaldo:listar": "node scripts/respaldo.js --listar",
     "respaldo:restaurar": "node scripts/respaldo.js --restaurar",
@@ -63,7 +63,8 @@
     "medir:busqueda": "node scripts/medir-busqueda.js",
     "medir:busqueda-fria": "node scripts/medir-busqueda-fria.js",
     "medir:consulta": "node scripts/medir-consulta-nombre.js",
-    "test:instalador": "node scripts/probar-instalador.js"
+    "test:instalador": "node scripts/probar-instalador.js",
+    "test:vigilancia": "node scripts/probar-vigilancia-real.js"
   },
   "keywords": [
     "visitantes",

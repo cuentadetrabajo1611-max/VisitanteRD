@@ -301,7 +301,17 @@ async function avisos(tenantId, filtros) {
        FROM vf_vigilancia_avisos a
        LEFT JOIN vf_visitas v ON v.id = a.visita_id
       WHERE ${donde}
-      ORDER BY a.creado DESC
+      -- El desempate por id NO es un adorno.
+      --
+      -- Cuando alguien bloqueado intenta entrar sin autorizacion se anotan dos avisos
+      -- en el mismo instante: el intento denegado y, si luego se autoriza, la entrada
+      -- permitida. Con "creado DESC" a secas, SQL Server puede devolverlos en
+      -- cualquier orden, asi que "el ultimo aviso" era cosa del azar: la prueba de la
+      -- bitacora esperaba "permitido" y unas veces lo encontraba y otras no.
+      --
+      -- El id crece con el tiempo, asi que ordenar por el como segundo criterio da el
+      -- orden real de los hechos, que es lo que se quiere ver en la pantalla.
+      ORDER BY a.creado DESC, a.id DESC
      OFFSET @salto ROWS FETCH NEXT @tamano ROWS ONLY`,
     Object.assign({}, parametros, { salto: p.salto, tamano: p.tamano })
   );

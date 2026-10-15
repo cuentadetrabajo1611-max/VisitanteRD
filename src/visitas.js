@@ -363,7 +363,32 @@ async function registrarEntrada(req, datos) {
   const aviso = cedula ? await vigilancia.consultarCedula(tenantId, cedula) : null;
   if (aviso && aviso.bloqueado) {
     const autorizado = util.booleano(datos.autorizar_bloqueado, false);
+
     if (!autorizado) {
+      /* Se deja constancia del intento ANTES de negarlo.
+       *
+       * La tabla de avisos de vigilancia llevaba tiempo en el esquema con su columna
+       * `decision` ('avisado' | 'permitido' | 'denegado') y con su pantalla de
+       * consulta, pero el registro NUNCA escribia en ella: solo devolvia el error.
+       * O sea que el vigilante veia "esta cedula esta bloqueada" en el momento y
+       * despues no quedaba rastro de que alguien lo habia intentado, que es
+       * justamente lo que sirve para decidir si el bloqueo esta haciendo su trabajo.
+       *
+       * La constancia se escribe aunque el intento se rechace: el aviso NO lleva
+       * visita_id porque no llego a haber visita. */
+      try {
+        await vigilancia.registrarAviso(req, {
+          vigilancia_id: aviso.id,
+          cedula,
+          decision: 'denegado',
+          motivo: aviso.motivo || 'Cédula en la lista de vigilancia',
+        });
+      } catch (e) {
+        /* Que no se pueda anotar no puede impedir el bloqueo: negar la entrada es lo
+           importante, y si esto falla se ve en el registro del servidor. */
+        console.error('[visitas] No se pudo anotar el intento de entrada de una cédula bloqueada: ' + e.message);
+      }
+
       return {
         ok: false,
         motivo: 'Esta cédula está BLOQUEADA: ' + aviso.motivo,
@@ -371,6 +396,7 @@ async function registrarEntrada(req, datos) {
         requiere_autorizacion: true,
       };
     }
+
     if (!util.limpiar(datos.motivo_autorizacion, 400)) {
       return {
         ok: false,
@@ -379,6 +405,14 @@ async function registrarEntrada(req, datos) {
         requiere_autorizacion: true,
       };
     }
+
+    /* Si se autoriza, el aviso lo escribe la RUTA, después de que la visita exista.
+     *
+     * No se escribe aquí a propósito: aquí todavía no hay visita, y la ruta ya anota
+     * la decisión 'permitido' con su visita_id y con el motivo de la autorización.
+     * Anotarlo también aquí duplicaba el aviso y dejaba el más nuevo sin visita, que
+     * es justo al revés de lo que hace falta. Lo detectó la prueba de la bitácora de
+     * avisos, que esperaba 'permitido' y encontraba otra cosa. */
   }
 
   // 2. Resolver identidad contra el padron (o aceptar lo escrito a mano).
