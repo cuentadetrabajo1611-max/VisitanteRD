@@ -20,7 +20,7 @@
     "test:primer-arranque": "node scripts/probar-primer-arranque.js",
     "test:impresion": "node scripts/probar-impresion.js",
     "test:personas": "node sql/95-pruebas-personas.js",
-    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:secretos && npm run test:consola-licencias && npm run test:reportes && npm run test:permisos && npm run test:sin-cedula && npm run test:preregistro && npm run test:vigilancia && npm run test:instalador && npm run test:despliegue && npm run test:esquema && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
+    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:secretos && npm run test:primer-dia && npm run test:consola-licencias && npm run test:reportes && npm run test:permisos && npm run test:sin-cedula && npm run test:preregistro && npm run test:vigilancia && npm run test:instalador && npm run test:despliegue && npm run test:esquema && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
     "respaldo": "node scripts/respaldo.js",
     "respaldo:listar": "node scripts/respaldo.js --listar",
     "respaldo:restaurar": "node scripts/respaldo.js --restaurar",
@@ -70,7 +70,8 @@
     "test:permisos": "node scripts/probar-permisos.js",
     "test:reportes": "node scripts/probar-reportes.js",
     "padron:comprobar": "node scripts/comprobar-padron.js",
-    "test:consola-licencias": "node scripts/probar-consola-licencias.js"
+    "test:consola-licencias": "node scripts/probar-consola-licencias.js",
+    "test:primer-dia": "node scripts/probar-primer-dia.js"
   },
   "keywords": [
     "visitantes",
