@@ -49,7 +49,10 @@
     "verificar": "npm run texto:revisar && npm run despliegue:revisar && npm run despliegue:simular",
     "demo:personas": "node scripts/demo-personas.js",
     "test:panel": "node scripts/probar-panel-licencias.js",
-    "desplegar:preparar": "node scripts/preparar-despliegue.js"
+    "desplegar:preparar": "node scripts/preparar-despliegue.js",
+    "desplegar": "node scripts/desplegar-dokploy.js --desplegar",
+    "desplegar:comprobar": "node scripts/desplegar-dokploy.js --comprobar",
+    "desplegar:estado": "node scripts/desplegar-dokploy.js --estado"
   },
   "keywords": [
     "visitantes",
