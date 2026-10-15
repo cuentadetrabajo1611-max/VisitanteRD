@@ -24,6 +24,16 @@ const gafete = require('./gafete');
 const avisos = require('./avisos');
 const vigilancia = require('./vigilancia');
 
+/* preregistro.js importa este módulo, así que aquí la dependencia es circular.
+ *
+ * Se carga de forma perezosa (dentro de la función que lo usa) en vez de arriba: si
+ * se cargara al principio, uno de los dos módulos recibiría el otro a medio construir
+ * y sus funciones saldrían undefined. Se hace con una función para que quede claro
+ * por qué no está arriba como los demás. */
+function moduloPreregistro() {
+  return require('./preregistro');
+}
+
 /* ------------------------------------------------------------------ */
 /* Consultas de apoyo                                                  */
 /* ------------------------------------------------------------------ */
@@ -356,6 +366,63 @@ function validarRegistro(datos, ajustes) {
 async function registrarEntrada(req, datos) {
   const tenantId = req.tenant_id;
   const ajustes = await ajustesDe(tenantId);
+
+  /* 0. Si viene un CÓDIGO DE VISITA ANUNCIADA, de ahí sale todo lo demás.
+   *
+   * El sistema sabía buscar el preregistro por cédula (al teclear la cédula ofrecía
+   * usarlo), pero NO por código. Así que un visitante que llegaba con su código y sin
+   * la cédula a mano no se podía registrar: el sistema pedía la cédula o el nombre, y
+   * el nombre lo tenía delante, en el preregistro.
+   *
+   * Aquí se completa lo que falte con los datos de la visita anunciada: el código es
+   * la llave que el visitante trae, y todo lo demás ya se apuntó cuando llamó.
+   *
+   * Los datos que SÍ vienen en la petición mandan sobre los del preregistro: si el
+   * recepcionista corrige algo al recibir (otro motivo, otro a quién visita), su
+   * corrección es la que vale. */
+  let pre = null;
+
+  if (util.limpiar(datos.codigo_preregistro, 20)) {
+    pre = await moduloPreregistro().porCodigo(tenantId, datos.codigo_preregistro);
+
+    if (!pre) {
+      return { ok: false, motivo: 'No hay ninguna visita anunciada con el código ' + datos.codigo_preregistro + '.' };
+    }
+
+    if (pre.estado === 'usado') {
+      return {
+        ok: false,
+        motivo: 'Ese código ya se usó' + (pre.usado ? ' el ' + util.fechaLegible(pre.usado) : '') + '.',
+        preregistro: pre,
+      };
+    }
+
+    if (pre.estado === 'cancelado') {
+      return { ok: false, motivo: 'Esa visita anunciada fue cancelada.', preregistro: pre };
+    }
+
+    if (pre.estado === 'vencido' || (pre.vence && new Date(pre.vence) < new Date())) {
+      return { ok: false, motivo: 'Esa visita anunciada ya venció. Regístrela como visita normal.', preregistro: pre };
+    }
+
+    /* Se rellena solo lo que no venga en la petición. */
+    datos = Object.assign({}, datos);
+    if (!util.limpiar(datos.cedula, 20) && pre.cedula) datos.cedula = pre.cedula;
+    if (!util.limpiar(datos.nombre_completo, 200)) datos.nombre_completo = pre.nombre_completo;
+    if (!datos.motivo_id && pre.motivo_id) datos.motivo_id = pre.motivo_id;
+    if (!datos.departamento_id && pre.departamento_id) datos.departamento_id = pre.departamento_id;
+    if (!util.limpiar(datos.visitado, 160) && pre.visitado) datos.visitado = pre.visitado;
+    if (!util.limpiar(datos.empresa, 200) && pre.empresa) datos.empresa = pre.empresa;
+    if (!util.limpiar(datos.telefono, 40) && pre.telefono) datos.telefono = pre.telefono;
+    if (!util.limpiar(datos.correo, 200) && pre.correo) datos.correo = pre.correo;
+    if (!util.limpiar(datos.vehiculo, 60) && pre.vehiculo) datos.vehiculo = pre.vehiculo;
+    if (!util.limpiar(datos.observaciones, 600) && pre.notas) datos.observaciones = pre.notas;
+    if (!datos.acompanantes && pre.acompanantes) datos.acompanantes = pre.acompanantes;
+
+    /* Y se deja dicho de qué visita anunciada viene, para que quede enlazada. */
+    datos.preregistro_id = pre.id;
+  }
+
   const { problemas, cedula, temperatura } = validarRegistro(datos, ajustes);
   if (problemas.length) return { ok: false, motivo: problemas.join(' ') };
 
