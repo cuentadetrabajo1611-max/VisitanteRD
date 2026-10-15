@@ -28,6 +28,12 @@ const lic = require(path.join(RAIZ, 'src', 'licencias', 'licencia.js'));
 const BASE = 'http://localhost:' + (process.env.PUERTO_LICENCIAS || 4100);
 const ADMIN = (process.env.ADMIN_TOKEN || config.adminToken || '').trim();
 
+/* El token de INSTALACION, que es distinto del de administracion: el primero lo
+   tiene el cliente y el segundo el vendedor. Las rutas de renovacion exigen el de
+   instalacion, porque antes no exigian ninguno y cualquiera que supiera el codigo
+   de una institucion se llevaba su licencia firmada. */
+const TOKEN_INSTALACION = (process.env.LICENCIA_TOKEN_ACTIVACION || config.licencia.tokenActivacion || '').trim();
+
 let ok = 0;
 let fallos = 0;
 const detalle = [];
@@ -195,9 +201,20 @@ async function principal() {
     });
 
     await prueba('un cliente suspendido tampoco puede renovar', async () => {
-      // Es lo que permite cortar el servicio a distancia de verdad.
-      const r = await api('POST', '/api/licencia/consultar', { tenant: TENANT, huella: null });
-      esperar(r.estado === 403, 'debería ser 403 y fue ' + r.estado);
+      /* Es lo que permite cortar el servicio a distancia de verdad.
+       *
+       * Ahora hace falta el token de instalación, y el orden importa: sin token la
+       * respuesta es 401 (no se le dice nada a quien no se ha identificado), y con
+       * token válido es 403 por estar suspendido. Se comprueban las dos. */
+      const sinToken = await api('POST', '/api/licencia/consultar', { tenant: TENANT, huella: null });
+      esperar(sinToken.estado === 401, 'sin token debería ser 401 y fue ' + sinToken.estado);
+
+      const conToken = await fetch(BASE + '/api/licencia/consultar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN_INSTALACION },
+        body: JSON.stringify({ tenant: TENANT, huella: null }),
+      });
+      esperar(conToken.status === 403, 'con token válido debería ser 403 y fue ' + conToken.status);
     });
 
     await prueba('pero su historial sigue estando', async () => {

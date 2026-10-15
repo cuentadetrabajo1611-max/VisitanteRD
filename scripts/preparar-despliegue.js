@@ -161,6 +161,9 @@ function nuevoSecreto() {
 const claveSql = nuevaClaveSql();
 const jwt = nuevoSecreto();
 const adminToken = nuevoSecreto();
+/* El token que comparten el servidor de licencias y cada instalacion. Sin el, las
+   rutas de renovacion y de aviso quedan cerradas. */
+const tokenActivacion = 'act-' + nuevoSecreto();
 bien('secretos generados (cópielos de aquí abajo)');
 
 /* 5. Comprobaciones finales. */
@@ -302,6 +305,9 @@ dato('CLAVE_SQL=', claveSql);
 console.log('  ' + C.gris + '# Sesiones y administración' + C.reset);
 dato('JWT_SECRET=', jwt);
 dato('ADMIN_TOKEN=', adminToken);
+console.log('  ' + C.gris + '# El token que comparten el servidor de licencias y cada cliente' + C.reset);
+console.log('  ' + C.gris + '# (el MISMO valor en este servidor y en la instalación de cada cliente)' + C.reset);
+dato('LICENCIA_TOKEN_ACTIVACION=', tokenActivacion);
 console.log('  ' + C.gris + '# Direcciones públicas (cámbielas por sus dominios)' + C.reset);
 console.log('    URL_PUBLICA=https://visitas.su-dominio.com');
 console.log('    LICENCIA_SERVIDOR_URL=https://licencias.su-dominio.com');

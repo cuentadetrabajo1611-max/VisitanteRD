@@ -101,6 +101,17 @@ services:
       PUERTO_LICENCIAS: '4100'
       HOST: 0.0.0.0
       ADMIN_TOKEN: ${ADMIN_TOKEN:?Defina ADMIN_TOKEN en el archivo .env}
+      # El token que comparten el vendedor y sus instalaciones.
+      #
+      # Sin el, las rutas de renovacion y de aviso quedan CERRADAS. Es a proposito:
+      # abiertas, cualquiera que supiera el codigo de una institucion (que es facil
+      # de adivinar: "junta-los-prados") pedia su licencia firmada y se la quedaba.
+      # El mismo valor va aqui y en la instalacion de cada cliente.
+      #
+      # La ACTIVACION POR ID no lo necesita: es publica porque tiene que serlo (un
+      # sistema recien instalado no tiene con que autenticarse), y lo que la protege
+      # es que el ID no se puede adivinar.
+      LICENCIA_TOKEN_ACTIVACION: ${LICENCIA_TOKEN_ACTIVACION:?Defina LICENCIA_TOKEN_ACTIVACION}
       LICENCIA_LLAVE_PRIVADA_B64: ${LICENCIA_LLAVE_PRIVADA_B64:?Defina LICENCIA_LLAVE_PRIVADA_B64}
       LICENCIA_LLAVE_PUBLICA_B64: ${LICENCIA_LLAVE_PUBLICA_B64:?Defina LICENCIA_LLAVE_PUBLICA_B64}
       LICENCIAS_REGISTRO: /app/datos/licencias-emitidas.json
@@ -183,6 +194,9 @@ services:
       # Y esa misma dirección es la que se configura en la instalación de cada
       # cliente, para que pueda activar con su ID.
       LICENCIA_SERVIDOR: ${LICENCIA_SERVIDOR_URL:-http://licencias:4100}
+      # El mismo token que tiene el servidor de licencias. Con el se autentica esta
+      # instalacion al renovar y al avisar que se activo.
+      LICENCIA_TOKEN_ACTIVACION: ${LICENCIA_TOKEN_ACTIVACION:?Defina LICENCIA_TOKEN_ACTIVACION}
       LICENCIA_ARCHIVO: /app/datos/licencia.vflow
       LICENCIA_LLAVE_PUBLICA_B64: ${LICENCIA_LLAVE_PUBLICA_B64}
       LICENCIA_DIAS_AVISO: '30'

@@ -44,9 +44,26 @@ function esperar(condicion, mensaje) {
   if (!condicion) throw new Error(mensaje || 'condición no cumplida');
 }
 
+/**
+ * El token de INSTALACION, que es distinto del de administracion.
+ *
+ * Las rutas que atienden a las instalaciones (renovar, avisar que se activo) exigen
+ * este token. Antes no exigian ninguno: cualquiera que supiera el codigo de una
+ * institucion pedia su licencia firmada y se la quedaba.
+ *
+ * `conToken`: 'admin' (por defecto), 'instalacion', o false para no mandar ninguno.
+ */
+const TOKEN_INSTALACION = (process.env.LICENCIA_TOKEN_ACTIVACION || config.licencia.tokenActivacion || '').trim();
+
 async function pedir(metodo, ruta, cuerpo, conToken) {
   const cabeceras = { 'Content-Type': 'application/json' };
-  if (conToken !== false) cabeceras.Authorization = 'Bearer ' + TOKEN;
+
+  if (conToken === 'instalacion') {
+    if (TOKEN_INSTALACION) cabeceras.Authorization = 'Bearer ' + TOKEN_INSTALACION;
+  } else if (conToken !== false) {
+    cabeceras.Authorization = 'Bearer ' + TOKEN;
+  }
+
   const r = await fetch(BASE + ruta, {
     method: metodo,
     headers: cabeceras,
@@ -187,7 +204,7 @@ async function principal() {
   console.log('Consulta desde una instalación');
 
   await prueba('una instalación puede pedir su licencia', async () => {
-    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, false);
+    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, 'instalacion');
     esperar(r.estado === 200, 'estado ' + r.estado + ': ' + (r.datos.mensaje || ''));
     esperar(r.datos.licencia, 'no vino la licencia');
     const contenido = lic.verificarFirma(r.datos.licencia);
@@ -197,21 +214,69 @@ async function principal() {
   await prueba('si la instalación ya tiene la última, el servidor dice "sin cambios"', async () => {
     const r = await pedir('POST', '/api/licencia/consultar', {
       tenant: TENANT, licencia_id: emitida.licencia_id, huella: HUELLA,
-    }, false);
+    }, 'instalacion');
     esperar(r.estado === 200, 'estado ' + r.estado);
     esperar(r.datos.sin_cambios === true, 'debería decir que no hay cambios');
   });
 
   await prueba('una institución desconocida no obtiene licencia', async () => {
-    const r = await pedir('POST', '/api/licencia/consultar', { tenant: 'no-existe-esta', huella: HUELLA }, false);
+    const r = await pedir('POST', '/api/licencia/consultar', { tenant: 'no-existe-esta', huella: HUELLA }, 'instalacion');
     esperar(r.estado === 404, 'debería responder 404 y respondió ' + r.estado);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /* El robo de licencias.                                              */
+  /*                                                                    */
+  /* Estas dos rutas estaban ABIERTAS: cualquiera que supiera el codigo  */
+  /* de una institucion (facil de adivinar o de oir: "junta-los-prados") */
+  /* pedia su licencia firmada y se la quedaba. Y el aviso de activacion */
+  /* escribia en el registro del vendedor sin autenticarse.             */
+  /* ------------------------------------------------------------------ */
+
+  await prueba('SIN token no se puede pedir la licencia de una institución (robo de licencias)', async () => {
+    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, false);
+    esperar(r.estado === 401, 'debería responder 401 y respondió ' + r.estado + '. ' +
+      'Si responde 200, cualquiera que sepa el código de la institución se lleva su licencia.');
+    esperar(!r.datos.licencia, 'devolvió la licencia sin token');
+  });
+
+  await prueba('SIN token no se puede escribir en el registro del vendedor', async () => {
+    const r = await pedir('POST', '/api/licencia/activada', {
+      tenant: TENANT, licencia_id: emitida.licencia_id, huella: HUELLA,
+    }, false);
+    esperar(r.estado === 401, 'debería responder 401 y respondió ' + r.estado);
+  });
+
+  await prueba('con un token de instalación inventado tampoco', async () => {
+    const r = await fetch(BASE + '/api/licencia/consultar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer inventado' },
+      body: JSON.stringify({ tenant: TENANT, huella: HUELLA }),
+    });
+    esperar(r.status === 401, 'debería responder 401 y respondió ' + r.status);
+  });
+
+  await prueba('el token de ADMINISTRACIÓN no sirve como token de instalación', async () => {
+    /* Son dos credenciales distintas y no deben valer la una por la otra: el de
+       administración lo tiene el vendedor, y el de instalación lo tiene el cliente. */
+    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, true);
+    esperar(r.estado === 401, 'el token de administración fue aceptado como token de instalación');
+  });
+
+  await prueba('la ACTIVACIÓN POR ID sigue siendo pública (tiene que serlo)', async () => {
+    /* Un sistema recién instalado no tiene con qué autenticarse: si esta ruta
+       exigiera token, no se podría activar nunca. Lo que la protege es que el ID
+       no se puede adivinar. */
+    const r = await pedir('POST', '/api/licencia/activar-por-id', { licencia_id: emitida.licencia_id }, false);
+    esperar(r.estado === 200, 'estado ' + r.estado + ': ' + (r.datos.mensaje || ''));
+    esperar(r.datos.licencia, 'no devolvió la licencia');
   });
 
   await prueba('la instalación puede avisar que se activó', async () => {
     const r = await pedir('POST', '/api/licencia/activada', {
       tenant: TENANT, licencia_id: emitida.licencia_id, huella: HUELLA,
       equipo: { nombre: 'EQUIPO-PRUEBA', sistema: 'test' },
-    }, false);
+    }, 'instalacion');
     esperar(r.estado === 200, 'estado ' + r.estado);
     esperar(r.datos.registrada === true, 'no se registró la activación');
   });
@@ -241,7 +306,7 @@ async function principal() {
   });
 
   await prueba('la licencia renovada sigue siendo válida', async () => {
-    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, false);
+    const r = await pedir('POST', '/api/licencia/consultar', { tenant: TENANT, huella: HUELLA }, 'instalacion');
     const e = lic.evaluar(r.datos.licencia);
     esperar(e.valida, 'la licencia renovada no es válida: ' + e.motivo);
   });

@@ -24,6 +24,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 const express = require('express');
 
 const config = require('./src/config');
@@ -41,18 +42,81 @@ app.use(express.json({ limit: '1mb' }));
 
 const REGISTRO = process.env.LICENCIAS_REGISTRO || path.join(config.raiz, 'datos', 'licencias-emitidas.json');
 
+/**
+ * Lee el registro de clientes.
+ *
+ * SI NO SE PUEDE LEER, LANZA. No devuelve una lista vacia.
+ *
+ * Esto era un fallo grave y silencioso: si el archivo quedaba a medio escribir o
+ * con un JSON roto, esta funcion devolvia [] y el siguiente guardado escribia una
+ * lista con UN solo cliente encima del archivo. Es decir: se perdian TODOS los
+ * clientes de golpe, sin ningun error, y se descubria cuando uno pedia su licencia.
+ *
+ * Vale mas que el panel de un error y no deje guardar, que perder la cartera
+ * entera sin enterarse.
+ */
 function leerRegistro() {
+  if (!fs.existsSync(REGISTRO)) return [];
+
+  let texto;
   try {
-    if (!fs.existsSync(REGISTRO)) return [];
-    return JSON.parse(fs.readFileSync(REGISTRO, 'utf8'));
+    texto = fs.readFileSync(REGISTRO, 'utf8');
   } catch (e) {
-    return [];
+    throw error(500, 'No se pudo leer el registro de licencias (' + REGISTRO + '): ' + e.message +
+      '. NO se ha modificado nada: arregle el archivo y vuelva a intentarlo.');
+  }
+
+  if (!texto.trim()) return [];
+
+  try {
+    const datos = JSON.parse(texto);
+    if (!Array.isArray(datos)) {
+      throw new Error('no es una lista');
+    }
+    return datos;
+  } catch (e) {
+    /* Deja una copia del archivo roto antes de nada, para poder recuperarlo a
+       mano: es la lista de clientes del negocio. */
+    try {
+      const copia = REGISTRO + '.roto-' + Date.now();
+      fs.copyFileSync(REGISTRO, copia);
+      console.error('[licencias] El registro está dañado. Se guardó una copia en: ' + copia);
+    } catch (e2) { /* si tampoco se puede copiar, el aviso de abajo ya lo dice */ }
+
+    throw error(500, 'El registro de licencias está dañado (' + e.message + '). Se guardó una copia ' +
+      'con extensión .roto-<fecha> al lado. Arréglelo antes de seguir: si se guardara ahora, se ' +
+      'perderían todos los clientes.');
   }
 }
 
+/**
+ * Guarda el registro SIN PODER DEJARLO A MEDIAS.
+ *
+ * Se escribe en un archivo temporal, se fuerza el volcado a disco y solo entonces
+ * se renombra encima del bueno. El renombrado es atomico: o queda el archivo
+ * anterior entero, o el nuevo entero, nunca uno mezclado.
+ *
+ * Escribir directamente sobre el archivo bueno tenia un riesgo real: un corte de
+ * luz o un reinicio del contenedor en mitad de la escritura dejaba el JSON roto, y
+ * con la version anterior de leerRegistro eso significaba perder todos los clientes.
+ */
 function guardarRegistro(lista) {
-  fs.mkdirSync(path.dirname(REGISTRO), { recursive: true });
-  fs.writeFileSync(REGISTRO, JSON.stringify(lista, null, 2), { mode: 0o600 });
+  const carpeta = path.dirname(REGISTRO);
+  fs.mkdirSync(carpeta, { recursive: true });
+
+  const temporal = REGISTRO + '.tmp-' + process.pid;
+
+  const contenido = JSON.stringify(lista, null, 2);
+  const descriptor = fs.openSync(temporal, 'w', 0o600);
+  try {
+    fs.writeFileSync(descriptor, contenido);
+    // Sin esto, el renombrado puede ocurrir antes que los datos lleguen al disco.
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+
+  fs.renameSync(temporal, REGISTRO);
 }
 
 /**
@@ -170,9 +234,16 @@ app.get(
  * Devuelve la licencia vigente de ese cliente si existe y es mas nueva que la
  * que el cliente ya tiene. Si no hay nada nuevo, devuelve sin_cambios para que
  * la instalacion no reescriba nada.
+ *
+ * EXIGE EL TOKEN DE INSTALACION, y esto cierra un robo de licencias: antes
+ * cualquiera que supiera el codigo de una institucion (que es facil de adivinar o
+ * de oir: "junta-los-prados") pedia aqui su licencia firmada y se la quedaba.
+ * Ademas, el amarre a un equipo se saltaba simplemente omitiendo la huella.
  */
 app.post(
   '/api/licencia/consultar',
+  limitar('consultar', 60, 60000),
+  exigeTokenDeInstalacion,
   envolver(async (req, res) => {
     const { tenant, licencia_id, huella } = req.body || {};
     if (!tenant) throw error(400, 'Falta el identificador de la institución.');
@@ -207,9 +278,18 @@ app.post(
       });
     }
 
-    // La huella solo se exige si la licencia esta amarrada a un equipo.
-    if (actual.huella && huella && actual.huella !== huella) {
-      throw error(403, 'Esta licencia está amarrada a otro equipo (' + actual.huella + ').');
+    /* El amarre a un equipo: si la licencia tiene huella, se EXIGE que coincida.
+     *
+     * Antes la condicion era "si la licencia tiene huella Y el cliente manda una Y
+     * no coinciden". Omitiendo la huella no se comprobaba nada, asi que el amarre
+     * no servia para nada: bastaba con no mandarla. */
+    if (actual.huella) {
+      if (!huella) {
+        throw error(403, 'Esta licencia está amarrada a un equipo concreto: hay que identificarse.');
+      }
+      if (actual.huella !== huella) {
+        throw error(403, 'Esta licencia está amarrada a otro equipo (' + actual.huella + ').');
+      }
     }
 
     const texto = lic.firmar(
@@ -281,11 +361,18 @@ app.post(
       throw error(403, 'Esa licencia venció el ' + String(entrada.hasta).slice(0, 10) + '. Pida una renovación.');
     }
 
-    /* La huella, si la licencia esta amarrada a un equipo. Se comprueba aqui y
-       no al renovar, para no entregar una licencia que luego no va a servir. */
+    /* La huella, si la licencia esta amarrada a un equipo.
+     *
+     * Se EXIGE que venga cuando la licencia la tiene: si no, el amarre se saltaba
+     * simplemente omitiendo el campo, que es lo mismo que no tener amarre. */
     const huella = String((req.body || {}).huella || '').trim();
-    if (entrada.huella && huella && entrada.huella !== huella) {
-      throw error(403, 'Esta licencia está amarrada a otro equipo.');
+    if (entrada.huella) {
+      if (!huella) {
+        throw error(403, 'Esta licencia está amarrada a un equipo concreto: hay que identificarse.');
+      }
+      if (entrada.huella !== huella) {
+        throw error(403, 'Esta licencia está amarrada a otro equipo.');
+      }
     }
 
     const texto = lic.firmar(
@@ -320,15 +407,128 @@ app.post(
   })
 );
 
+/* ------------------------------------------------------------------ */
+/* El token de activacion                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * El token que comparten el vendedor y sus instalaciones.
+ *
+ * POR QUE HACE FALTA
+ * ------------------
+ * Las rutas de renovacion y de aviso estaban ABIERTAS: cualquiera que supiera el
+ * codigo de una institucion (que es facil de adivinar o de oir: "junta-los-prados")
+ * podia pedir su licencia firmada y quedarse con ella. Y el aviso de activacion
+ * escribia en el registro del vendedor sin ninguna autenticacion, asi que se podia
+ * corromper el inventario de clientes desde fuera.
+ *
+ * La pieza ya existia a medias: las instalaciones YA mandaban el token, y estaba en
+ * la configuracion, pero el servidor no lo comprobaba en ninguna ruta.
+ *
+ * QUE PASA SI NO SE CONFIGURA
+ * ---------------------------
+ * Si no hay token, estas rutas quedan cerradas y se avisa fuerte al arrancar. Es
+ * deliberado: dejar el servidor de licencias abierto por omision es peor que
+ * obligar a configurarlo. La ACTIVACION POR ID sigue funcionando, que es publica
+ * porque tiene que serlo (el sistema recien instalado no tiene con que
+ * autenticarse): lo que la protege es que el ID no se puede adivinar.
+ */
+function tokenActivacion() {
+  return (process.env.LICENCIA_TOKEN_ACTIVACION || config.licencia.tokenActivacion || '').trim();
+}
+
+/** Comprueba el token en las rutas que atienden a las instalaciones. */
+function exigeTokenDeInstalacion(req, res, next) {
+  const esperado = tokenActivacion();
+
+  if (!esperado) {
+    return responderError(res, error(503,
+      'Este servidor de licencias no tiene LICENCIA_TOKEN_ACTIVACION configurado, así que no ' +
+      'atiende renovaciones. Configure esa variable aquí Y en las instalaciones de sus clientes.'));
+  }
+
+  const enviado = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+
+  /* Comparacion de tiempo constante: comparar con === filtra cuantos caracteres
+     iniciales acerto quien lo intenta. Es una debilidad teorica con un token de 36
+     bytes al azar, pero evitarla cuesta dos lineas. */
+  const a = Buffer.from(enviado);
+  const b = Buffer.from(esperado);
+  const iguales = a.length === b.length && crypto.timingSafeEqual(a, b);
+
+  if (!iguales) {
+    console.warn('[licencias] Petición rechazada desde ' +
+      (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '?') +
+      ' por token de instalación inválido en ' + req.path);
+    return responderError(res, error(401, 'Token de instalación inválido.'));
+  }
+
+  next();
+}
+
+/**
+ * Un limite de peticiones por IP.
+ *
+ * Las rutas publicas del servidor de licencias no tenian ninguno: se podia barrer
+ * el espacio de IDs y de codigos de institucion a la velocidad que aguantara el
+ * disco. Con esto, un barrido deja de ser barato.
+ */
+function limitar(clave, maximo, ventanaMs) {
+  const registros = new Map();
+  return (req, res, next) => {
+    const ahora = Date.now();
+    const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
+      req.socket.remoteAddress || '?';
+    const k = clave + ':' + ip;
+
+    const previo = registros.get(k);
+    const lista = (previo && previo.fin > ahora) ? previo.lista : [];
+    lista.push(ahora);
+
+    const recientes = lista.filter((t) => t > ahora - ventanaMs);
+    registros.set(k, { lista: recientes, fin: ahora + ventanaMs });
+
+    // Limpieza, para que el Map no crezca sin fin.
+    if (registros.size > 5000) {
+      for (const [kk, vv] of registros) if (vv.fin < ahora) registros.delete(kk);
+    }
+
+    if (recientes.length > maximo) {
+      return responderError(res, error(429, 'Demasiadas peticiones. Espere un momento.'));
+    }
+    next();
+  };
+}
+
 /** La instalacion avisa que se activo. Queda en el historial del cliente. */
 app.post(
   '/api/licencia/activada',
+  limitar('activada', 30, 60000),
+  exigeTokenDeInstalacion,
   envolver(async (req, res) => {
     const { tenant, licencia_id, huella, equipo } = req.body || {};
     const lista = leerRegistro();
     const i = lista.findIndex((l) => l.licencia_id === licencia_id && l.tenant === String(tenant || '').toLowerCase());
     if (i < 0) throw error(404, 'Esa licencia no existe en este servidor.');
+
+    /* Solo se registra si la huella coincide con la que tiene la licencia.
+       Sin esto, cualquiera podia inflar la lista de instalaciones de un cliente
+       hasta hacer el archivo inservible: cada aviso lo lee y lo reescribe entero. */
+    if (lista[i].huella && huella && lista[i].huella !== huella) {
+      throw error(403, 'Esa licencia está amarrada a otro equipo.');
+    }
+
+    /* Y hay un tope: una licencia no puede tener mas instalaciones de las que
+       permite. Antes se podia anadir sin limite. */
+    const topeInstalaciones = (lista[i].limites && lista[i].limites.instalaciones) || 2;
     lista[i].instalaciones = lista[i].instalaciones || [];
+    const yaEsta = lista[i].instalaciones.some((x) => x.huella === huella);
+
+    if (!yaEsta && lista[i].instalaciones.length >= topeInstalaciones) {
+      throw error(403, 'Esta licencia ya está activada en ' + lista[i].instalaciones.length +
+        ' equipo(s) y su límite es ' + topeInstalaciones + '.');
+    }
+
     const existente = lista[i].instalaciones.find((x) => x.huella === huella);
     if (existente) {
       existente.ultima_vez = new Date().toISOString();
