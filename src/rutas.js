@@ -54,6 +54,27 @@ function rutas(ctx) {
   const conSesion = acceso.sesion;
   const permiso = acceso.exigePermiso;
 
+  /**
+   * Exige que la licencia incluya un modulo que se PAGA aparte.
+   *
+   * Hasta ahora el modulo no se comprobaba en NINGUNA ruta: la licencia decia
+   * que modulos tenia el cliente, pero el sistema dejaba usar todos. La lista de
+   * modulos era decorativa, y eso hace que la licencia no sirva de nada.
+   *
+   * Que modulos se bloquean y cuales no, y por que:
+   *
+   *   SE BLOQUEAN los que se venden aparte y no afectan a la operacion diaria:
+   *   reportes, vigilancia, pre-registro y la API.
+   *
+   *   NO SE BLOQUEAN los que sostienen el sistema: registro, recepcion, gafetes,
+   *   configuracion, usuarios y personalizacion. Un recepcionista que de pronto
+   *   no puede registrar visitantes por un modulo que vencio, con gente en la
+   *   puerta, es un problema mucho mas grave que una licencia impagada. Para eso
+   *   esta el vencimiento de la licencia, que ya deja el sistema en solo lectura
+   *   sin impedir consultar lo registrado.
+   */
+  const modulo = (nombre) => acceso.exigeModulo(gestor, nombre);
+
   /* ================================================================== */
   /* Salud y marca (publicas)                                           */
   /* ================================================================== */
@@ -816,6 +837,7 @@ function rutas(ctx) {
   r.get(
     '/preregistros',
     conSesion,
+    modulo('preregistro'),
     permiso('preregistro.ver'),
     asincrono(async (req, res) => {
       responder(res, {
@@ -877,6 +899,7 @@ function rutas(ctx) {
   r.get(
     '/vigilancia',
     conSesion,
+    modulo('vigilancia'),
     permiso('vigilancia.ver'),
     asincrono(async (req, res) => {
       responder(res, {
@@ -959,6 +982,7 @@ function rutas(ctx) {
   r.get(
     '/reportes/resumen',
     conSesion,
+    modulo('reportes'),
     permiso('reportes.ver'),
     asincrono(async (req, res) => {
       responder(res, {
