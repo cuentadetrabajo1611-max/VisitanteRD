@@ -52,6 +52,16 @@ let fallos = 0;
 
 function bien(t) { ok++; console.log('  [ok]    ' + t); }
 function mal(t) { fallos++; console.log('  [FALLA] ' + t); }
+
+/* Un aviso NO es un fallo: el despliegue puede seguir. Pero se cuentan aparte para que
+ * la comprobación diga cuántas cosas conviene mirar antes de seguir, en vez de dar un
+ * "todo en orden" que oculte lo que falta.
+ *
+ * Esta función NO existía, y la sección de dominios la llamaba: `--comprobar` se caía
+ * con "aviso is not defined" en cuanto no se indicaba ningún dominio, o sea en la
+ * primera ejecución de cualquiera. Un error que no dice nada del problema real. */
+let avisos = 0;
+function aviso(t) { avisos++; console.log('  [ojo]   ' + t); }
 function info(t) { console.log('          ' + t); }
 function paso(t) { console.log(''); console.log('  ' + t); }
 
@@ -227,6 +237,15 @@ async function comprobar() {
     info('  $env:VISITAS_DOMINIO = "visitas.su-dominio.com"');
     info('  $env:LICENCIAS_DOMINIO = "licencias.su-dominio.com"');
     info('Y que los dos nombres apunten a 206.183.130.121 en su proveedor de DNS.');
+
+    /* Si no hay dominio de licencias, el servidor queda con su nombre interno de Docker
+       y NINGUNA instalación de cliente podrá activarse ni renovar. Conviene decirlo
+       ahora y no descubrirlo cuando ya haya un cliente esperando. */
+    aviso('sin LICENCIAS_DOMINIO, el servidor de licencias queda en ' +
+      (variablesDelCompose().LICENCIA_SERVIDOR_URL || 'http://licencias:4100') +
+      ', que solo existe dentro del servidor.');
+    info('Las instalaciones de sus clientes NO podrán activarse ni renovar hasta que');
+    info('el servidor de licencias tenga una dirección pública con HTTPS.');
   } else {
     for (const d of dominios) {
       bien(d.host + '  ->  ' + d.servicio + ':' + d.puerto);
@@ -456,6 +475,28 @@ function variablesDelCompose() {
     const v = process.env[n];
     if (v) valores[n] = v;
   }
+
+  /* LAS DIRECCIONES PÚBLICAS SE DEDUCEN DEL DOMINIO, si no se dieron ya.
+   *
+   * Esto no es un adorno: `LICENCIA_SERVIDOR_URL` trae por defecto el nombre interno
+   * de Docker (http://licencias:4100). Ese nombre solo existe DENTRO del servidor, así
+   * que si se despliega así, las instalaciones de los clientes no pueden alcanzar el
+   * servidor de licencias para activarse: se instalan, piden el ID de licencia y no
+   * hay forma de que lleguen. El fallo aparece en casa del cliente, no aquí.
+   *
+   * Como el dominio ya se pide para el certificado, se aprovecha: si indicó
+   * LICENCIAS_DOMINIO, la dirección pública es ese dominio con https. Y lo mismo para
+   * la dirección pública del sistema. Si ya venían definidas a mano, mandan ellas. */
+  const licencias = (process.env.LICENCIAS_DOMINIO || '').trim();
+  if (licencias && !valores.LICENCIA_SERVIDOR_URL) {
+    valores.LICENCIA_SERVIDOR_URL = 'https://' + licencias;
+  }
+
+  const visitas = (process.env.VISITAS_DOMINIO || '').trim();
+  if (visitas && !valores.URL_PUBLICA) {
+    valores.URL_PUBLICA = 'https://' + visitas;
+  }
+
   return valores;
 }
 
@@ -550,6 +591,9 @@ async function principal() {
     console.log('');
     console.log('  ' + '='.repeat(66));
     console.log('  Todo listo para desplegar.');
+    if (avisos) {
+      console.log('  ' + avisos + ' aviso(s) arriba: no impiden desplegar, pero léalos.');
+    }
     console.log('  Ejecute:  node scripts/desplegar-dokploy.js --desplegar');
     console.log('');
     return;

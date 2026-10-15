@@ -158,13 +158,123 @@ function nuevoSecreto() {
   return crypto.randomBytes(36).toString('base64').replace(/[+/=]/g, '');
 }
 
-const claveSql = nuevaClaveSql();
-const jwt = nuevoSecreto();
-const adminToken = nuevoSecreto();
+/** Lee el .env, si existe, como objeto {CLAVE: valor}. */
+function leerEnv() {
+  const ruta = path.join(RAIZ, '.env');
+  const salida = {};
+  if (!fs.existsSync(ruta)) return salida;
+
+  for (const l of fs.readFileSync(ruta, 'utf8').split('\n')) {
+    const t = l.trim();
+    if (!t || t.startsWith('#')) continue;
+    const p = t.indexOf('=');
+    if (p > 0) salida[t.slice(0, p)] = t.slice(p + 1);
+  }
+  return salida;
+}
+
+/**
+ * Guarda en el .env los valores que falten, SIN tocar los que ya esten.
+ *
+ * POR QUE ESTO ES IMPORTANTE
+ * --------------------------
+ * El script de despliegue manda a Dokploy las variables que encuentre en el .env. Si la
+ * clave de SQL o las llaves no estan ahi, se manda un compose al que le faltan variables
+ * OBLIGATORIAS: el despliegue "funciona" y despues el contenedor de la base no arranca,
+ * sin decir por que. Guardandolas aqui, el despliegue las manda solo.
+ *
+ * Y LOS VALORES QUE YA EXISTEN NO SE TOCAN, con una excepcion: los que se pasan en
+ * `reemplazar`. Antes se generaba una clave de SQL nueva en CADA corrida: si ya habia
+ * desplegado, la clave que se le ensenaba no era la que la base tiene de verdad, y el
+ * contenedor de SQL Server no arrancaba. Un valor que ya sirvio no se cambia nunca por
+ * volver a ejecutar esto.
+ *
+ * La excepcion son los secretos de desarrollo: el .env de la maquina local tiene un JWT
+ * que empieza por "dev-" y un token de administracion descriptivo, comodos para trabajar
+ * aqui. Si no se reemplazaran, ESOS serian los que acabarian en el VPS.
+ */
+function guardarEnv(nuevos, reemplazar) {
+  const ruta = path.join(RAIZ, '.env');
+  const actual = fs.existsSync(ruta) ? fs.readFileSync(ruta, 'utf8') : '';
+  const lineas = actual ? actual.split('\n') : [];
+  const forzar = reemplazar || [];
+  const guardados = [];
+
+  for (const [clave, valor] of Object.entries(nuevos)) {
+    if (!valor) continue;
+
+    const i = lineas.findIndex((l) => l.trim().startsWith(clave + '='));
+    if (i !== -1) {
+      const puesto = lineas[i].trim().slice(clave.length + 1);
+      /* Se rellena si esta vacio, o si se pidio reemplazarlo. */
+      if (!puesto || forzar.indexOf(clave) !== -1) {
+        lineas[i] = clave + '=' + valor;
+        guardados.push(clave);
+      }
+      continue;
+    }
+
+    lineas.push(clave + '=' + valor);
+    guardados.push(clave);
+  }
+
+  if (guardados.length) {
+    fs.writeFileSync(ruta, lineas.join('\n'));
+  }
+  return guardados;
+}
+
+/* Los valores que ya esten en el .env SE REUTILIZAN. Generar otros nuevos en cada
+   corrida rompe lo que ya funciona: la clave de SQL de un despliegue hecho no se puede
+   cambiar sin recrear la base, y las llaves de licencia no se pueden cambiar sin
+   invalidar todas las licencias emitidas. */
+const envActual = leerEnv();
+
+/**
+ * Un secreto que NO sirve para producción.
+ *
+ * El .env de la maquina de desarrollo tiene valores comodos para trabajar en local: un
+ * JWT que empieza por "dev-", un ADMIN_TOKEN que se llama "visitaflow_admin_local". Si
+ * se reutilizan tal cual, ESOS son los que acaban en el VPS: el mismo JWT que cualquiera
+ * que haya visto el proyecto puede firmar, y un token de administracion adivinable.
+ *
+ * No basta con que la variable exista: tiene que valer. Aqui se detectan los de
+ * ejemplo, los de desarrollo y los demasiado cortos, y se generan nuevos.
+ */
+function esDebil(valor) {
+  if (!valor) return true;
+  const v = String(valor);
+  if (/^(dev|test|local|cambie|ejemplo|secreto|changeme|password)/i.test(v)) return true;
+  if (/^visitaflow_?(admin|dev|local)/i.test(v)) return true;
+  if (/cambie|change.?me|ejemplo/i.test(v)) return true;
+  return v.length < 32;
+}
+
+const debiles = [];
+const claveSql = envActual.CLAVE_SQL || nuevaClaveSql();
+
+let jwt = envActual.JWT_SECRET;
+if (esDebil(jwt)) { debiles.push('JWT_SECRET'); jwt = nuevoSecreto(); }
+
+let adminToken = envActual.ADMIN_TOKEN;
+if (esDebil(adminToken)) { debiles.push('ADMIN_TOKEN'); adminToken = nuevoSecreto(); }
+
 /* El token que comparten el servidor de licencias y cada instalacion. Sin el, las
    rutas de renovacion y de aviso quedan cerradas. */
-const tokenActivacion = 'act-' + nuevoSecreto();
-bien('secretos generados (cópielos de aquí abajo)');
+const tokenActivacion = envActual.LICENCIA_TOKEN_ACTIVACION || 'act-' + nuevoSecreto();
+
+if (envActual.CLAVE_SQL) bien('se reutiliza la clave de SQL que ya estaba en el .env');
+else bien('clave de SQL generada');
+
+if (debiles.length) {
+  /* Se dice claro: son los que se van a mandar al VPS, y los de desarrollo no valen. */
+  aviso(debiles.join(' y ') + ' del .env eran de desarrollo, de ejemplo o demasiado cortos.');
+  console.log('          Se generaron nuevos para el VPS: los de local no sirven en producción.');
+} else {
+  bien('se reutilizan el JWT y el token de administración que ya estaban');
+}
+
+bien('secretos listos');
 
 /* 5. Comprobaciones finales. */
 titulo('5. Comprobaciones finales');
@@ -295,6 +405,38 @@ if (problemas) {
   process.exit(1);
 }
 
+/* ------------------------------------------------------------------ */
+/* Se guardan en el .env los valores OBLIGATORIOS que falten.
+ *
+ * Esto es lo que hace que el despliegue funcione de una tirada: el script de despliegue
+ * manda a Dokploy las variables que encuentre en el .env, asi que las obligatorias
+ * tienen que estar ahi. Antes no se guardaban, y el resultado era un despliegue que
+ * "salia bien" y luego no arrancaba porque al compose le faltaba la clave de SQL o las
+ * llaves.
+ *
+ * El .env esta ignorado por git, asi que nada de esto acaba en el repositorio. */
+const guardados = guardarEnv({
+  CLAVE_SQL: claveSql,
+  JWT_SECRET: jwt,
+  ADMIN_TOKEN: adminToken,
+  LICENCIA_TOKEN_ACTIVACION: tokenActivacion,
+  LICENCIA_LLAVE_PRIVADA_B64: b64Privada,
+  LICENCIA_LLAVE_PUBLICA_B64: b64Publica,
+}, debiles);
+
+if (guardados.length) {
+  console.log('');
+  bien('guardados en .env (el despliegue los manda solo): ' + guardados.join(', '));
+}
+
+if (b64Privada) {
+  /* La privada tambien va en el .env para que el despliegue la mande, pero ADEMAS se
+     imprime: el servicio "licencias" la necesita en su propio entorno dentro de Dokploy,
+     y el .env es local, no viaja al servidor. */
+  console.log('  ' + C.gris + '  (la privada va en .env y además se pega en Dokploy, ver abajo)' + C.reset);
+}
+
+console.log('');
 console.log('  ' + C.verde + 'Todo listo. Estos son los valores para Dokploy:' + C.reset);
 
 console.log('');
