@@ -860,11 +860,29 @@ body.vf-hoja--termica .gafete__franja {
 .grafico__punto { fill: var(--marca); }
 
 .barras-h { display: grid; gap: 0.5rem; }
-.barras-h__fila { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; gap: 0.6rem; align-items: center; font-size: 0.85rem; }
-.barras-h__etiqueta { color: var(--texto-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.barras-h__pista { background: var(--superficie-2); border-radius: 99px; height: 20px; overflow: hidden; }
+/* La etiqueta se queda con el ancho que necesita y la barra con lo que sobra.
+ *
+ * Estaba en una rejilla con la etiqueta al 34%, y los nombres reales no cabian:
+ * "Encargado de Recursos Humanos" salia como "Encargado de Re…". Con `max-content`
+ * en la rejilla quedo PEOR (los nombres se recortaban mas), asi que se hace con
+ * flex, que reparte el espacio como se espera: la etiqueta crece hasta su texto y no
+ * se encoge, la barra ocupa el resto, y el numero se queda con lo suyo.
+ *
+ * El tope del 62% es por si un nombre fuera larguisimo: se recorta antes de dejar la
+ * barra sin sitio, que es lo que se esta comparando. */
+.barras-h__fila { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; }
+.barras-h__etiqueta {
+  color: var(--texto-suave);
+  flex: 0 1 auto;
+  min-width: 90px;
+  max-width: 62%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .barras-h__valor { background: var(--marca); height: 100%; border-radius: 99px; min-width: 3px; }
-.barras-h__numero { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.85rem; }
+.barras-h__pista { background: var(--superficie-2); border-radius: 99px; height: 20px; overflow: hidden; flex: 1 1 auto; min-width: 40px; }
+.barras-h__numero { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.85rem; flex: 0 0 auto; }
 
 /* ============================================================================
    Utilidades
