@@ -223,21 +223,26 @@ async function principal() {
 
       /* Y la prueba de verdad: leerlo como lo lee Excel.
        *
-       * Dos cosas que hay que decirle a pandas, y las dos son a propósito del sistema:
+       * El SEPARADOR SE DETECTA SOLO, en vez de decirle a pandas que es punto y coma.
+       * El sistema usa ";" a proposito (en espanol Excel usa ";" como separador de
+       * listas, porque la coma es el separador decimal: un CSV con comas se abriria en
+       * una sola columna). Detectandolo, la prueba comprueba ademas QUE separador trae
+       * de verdad, que es mas de lo que se comprobaba antes.
        *
-       *  - El separador es PUNTO Y COMA, no coma. En español, Excel usa ";" como
-       *    separador de listas porque la coma es el separador decimal: un CSV con comas
-       *    se abriría en una sola columna. Si algún día alguien lo cambia a comas, esta
-       *    prueba lo va a notar aquí.
-       *
-       *  - La ruta se pasa por la LINEA DE COMANDOS, no escrita dentro del script: en
-       *    Windows, una ruta con barras invertidas dentro de un texto de Python es una
-       *    fuente inagotable de problemas, y el error que sale no dice nada de la causa. */
+       * La ruta se pasa por la LINEA DE COMANDOS, no escrita dentro del script: en
+       * Windows, una ruta con barras invertidas dentro de un texto de Python da un error
+       * que no dice nada de la causa. */
       const script = path.join(os.tmpdir(), 'leer-csv-' + Date.now() + '.py');
       fs.writeFileSync(script, [
-        'import sys',
+        'import sys, csv',
         'import pandas as pd',
-        "df = pd.read_csv(sys.argv[1], sep=';', encoding='utf-8-sig')",
+        'ruta = sys.argv[1]',
+        /* El BOM se quita para poder mirar la primera linea; el resto se lee como utf-8. */
+        "crudo = open(ruta, encoding='utf-8-sig').read()",
+        "primera = crudo.split(chr(10))[0]",
+        "sep = ';' if primera.count(';') >= primera.count(',') else ','",
+        "print('SEPARADOR=' + repr(sep))",
+        'df = pd.read_csv(ruta, sep=sep, encoding="utf-8-sig")',
         "print('FILAS=' + str(len(df)))",
         "print('COLUMNAS=' + '|'.join(str(c) for c in df.columns))",
         "print('CAMPOS=' + str(df.shape[1]))",
@@ -251,41 +256,54 @@ async function principal() {
       /* Se prueban varios interpretes: PYTHON_BIN primero, y si no, los del sistema. Hay
          que usar uno que TENGA pandas: con uno pelado el script falla y la prueba no
          comprobaria nada de lo que importa. */
-      const interpretes = [process.env.PYTHON_BIN, 'python', 'python3'].filter(Boolean);
+      /* Se buscan interpretes hasta encontrar uno CON PANDAS.
+       *
+       * El de la maquina puede no tenerlo, y el del harness vive en una ruta conocida
+       * (la que publica el propio entorno). Que la prueba dependa de que alguien se
+       * acuerde de definir PYTHON_BIN es fragil: si no esta, la comprobacion mas
+       * importante —si Excel va a mostrar los nombres bien— no se hace y nadie se entera. */
+      const rutasConocidas = [
+        process.env.PYTHON_BIN,
+        process.env.PYTHON,
+        'C:\\Users\\Admin\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\python\\python.exe',
+      ].filter(Boolean);
+
+      const interpretes = rutasConocidas.concat(['python', 'python3', 'py']);
+      const vistos = {};
       let salida = '';
       let usado = null;
       const intentos = [];
 
       /* PYTHONIOENCODING es necesario: en Windows Python escribe a la consola en cp1252
-         y los acentos salen como caracteres rotos. Aqui no se está mirando la salida de
-         Python por su belleza, se está buscando "FILAS=", y con la codificación
-         equivocada la propia marca se corrompe y la prueba parecía no funcionar. */
+         y los acentos salen como caracteres rotos. Aqui no se mira la salida de Python
+         por su belleza, se busca "FILAS=", y con la codificacion equivocada la propia
+         marca se corrompe y la prueba parecia no funcionar. */
       const entornoPy = Object.assign({}, process.env, { PYTHONIOENCODING: 'utf-8' });
 
       for (const py of interpretes) {
-        const prueba = spawnSync(py, [script, destino], { encoding: 'utf8', timeout: 120000, env: entornoPy });
+        if (vistos[py]) continue;
+        vistos[py] = true;
 
-        /* Se guarda TODO lo que diga el intérprete, no solo la última línea: cuando algo
-           falla al arrancar, el motivo está en las primeras. */
+        const prueba = spawnSync(py, [script, destino], { encoding: 'utf8', timeout: 120000, env: entornoPy });
         const s = (prueba.stdout || '') + (prueba.stderr || '');
-        intentos.push(py.split('\\').slice(-1)[0] +
-          ' -> status=' + prueba.status +
-          (prueba.error ? ' error=' + prueba.error.code : '') +
-          ' salida=' + JSON.stringify(s.slice(-300)));
 
         if (prueba.status === 0 && /FILAS=/.test(s)) {
           salida = s;
           usado = py;
           break;
         }
-        salida = s;
+
+        /* Se guarda el motivo, recortado por el final: el error util viene al final. */
+        intentos.push((py.split('\\').slice(-1)[0] || py) + ' -> status=' + prueba.status +
+          (prueba.error ? ' error=' + prueba.error.code : '') +
+          ' salida=' + JSON.stringify(s.slice(-160)));
       }
 
       if (!usado) {
         /* Que no se pueda leer con pandas NO puede pasar en silencio: es la unica
            comprobacion que dice si Excel va a mostrar los nombres bien. */
-        mal('no se pudo leer el CSV con pandas, asi que NO se comprobo si Excel lo abre bien' +
-          (process.env.PYTHON_BIN ? '' : ' (defina PYTHON_BIN con un python que tenga pandas)'));
+        mal('no se encontró ningún intérprete de Python con pandas, así que NO se comprobó ' +
+          'si Excel abre bien el archivo');
         for (const i of intentos) info('intento: ' + i);
       } else {
         const m = (k) => ((new RegExp('^' + k + '=(.*)$', 'm').exec(salida) || [])[1] || '');
@@ -297,6 +315,16 @@ async function principal() {
         const cols = m('COLUMNAS');
         if (cols.split('|').length >= 3) bien('trae columnas: ' + cols);
         else mal('trae muy pocas columnas: ' + cols);
+
+        /* El separador tiene que ser punto y coma: en español Excel usa ";" como
+           separador de listas, así que un CSV con comas se abriría en una sola columna.
+           Ahora se comprueba cuál trae de verdad. */
+        const sep = m('SEPARADOR');
+        if (sep.indexOf(';') !== -1) {
+          bien('el separador es punto y coma (Excel en español lo abre en columnas)');
+        } else {
+          mal('el separador es coma (' + sep + '): en Excel en español se abriría todo en una columna');
+        }
 
         if (m('MOJIBAKE') === 'True') {
           mal('EL CSV TIENE MOJIBAKE: los nombres con tilde salen como "PEÃ‘A" al abrirlo');
