@@ -28,6 +28,11 @@ const BASE = 'http://localhost:' + config.servidor.puerto;
 const DESTINO = path.join(RAIZ, 'capturas');
 const PERFIL = path.join(RAIZ, 'tmp', 'chrome-perfil');
 
+/* Una cédula que EXISTE en la base de cédulas de esta máquina. Se usa para la
+   captura del registro con la consulta ya hecha: con una inventada, la pantalla
+   saldría diciendo que no está en el padrón, que no es lo que se quiere enseñar. */
+const CEDULA_DE_EJEMPLO = '001-0000001-7';
+
 const NAVEGADORES = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
@@ -40,6 +45,11 @@ const PANTALLAS = [
   { nombre: '01-acceso', ruta: '#/acceso', publica: true, descripcion: 'Pantalla de acceso' },
   { nombre: '02-panel', ruta: '#/panel', descripcion: 'Panel principal' },
   { nombre: '03-registro', ruta: '#/registro', descripcion: 'Registro de visita' },
+  /* La misma pantalla pero con una cédula ya consultada. Sin esto, la captura del
+     registro sale casi vacía: el formulario aparece después de consultar. Se usa la
+     cédula que trae el propio padrón para que los datos sean de verdad. */
+  { nombre: '03b-registro-consultado', ruta: '#/registro?cedula=' + CEDULA_DE_EJEMPLO,
+    descripcion: 'Registro con la cédula consultada', alto: 1300 },
   { nombre: '04-dentro', ruta: '#/dentro', descripcion: 'Visitantes dentro' },
   { nombre: '05-bitacora', ruta: '#/bitacora', descripcion: 'Bitácora de visitas' },
   { nombre: '06-preregistros', ruta: '#/preregistros', descripcion: 'Visitas anunciadas' },

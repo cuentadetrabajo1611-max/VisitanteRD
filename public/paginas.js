@@ -483,6 +483,24 @@ VF.registrarRuta('registro', {
     });
     document.getElementById('consultar').addEventListener('click', consultar);
 
+    /* La cédula puede venir EN LA DIRECCIÓN:  #/registro?cedula=001-0000001-7
+     *
+     * Esto es para el lector de códigos de barras de la recepción. Un lector se
+     * comporta como un teclado que escribe muy rápido y pulsa Enter, así que ya
+     * funcionaba escribiendo en el campo; pero con la dirección se puede además
+     * dejar un acceso directo en el escritorio del recepcionista que abra el
+     * registro con la cédula ya consultada, y sirve para que la pantalla se pueda
+     * comprobar sin teclado. */
+    if (params && params.cedula) {
+      const d = String(params.cedula).replace(/\D/g, '').slice(0, 11);
+      if (d.length === 11) {
+        entradaCedula.value = d.slice(0, 3) + '-' + d.slice(3, 10) + '-' + d.slice(10);
+        consultar();
+      } else {
+        entradaCedula.value = String(params.cedula);
+      }
+    }
+
     async function consultar() {
       const cedula = entradaCedula.value.replace(/\D/g, '');
       if (cedula.length !== 11) {
