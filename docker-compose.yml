@@ -67,8 +67,15 @@ services:
       #   mkdir -p ./datos-sql && sudo chown -R 10001:0 ./datos-sql
       #
       - datos-sql:/var/opt/mssql
-      # Para subir el padron ligero ya construido (.bak), descomente y ponga
-      # ahi el archivo. Vea las notas al final.
+      # El padron ligero ya construido (.bak) NO hace falta meterlo por volumen.
+      #
+      # La via recomendada es subirlo con scp al VPS y meterlo en el contenedor con
+      # `docker cp` (vea docs/DESPLIEGUE-VPS.md, seccion 9). Son dos ordenes, no toca
+      # este archivo, y no se pierde en el siguiente despliegue.
+      #
+      # Si prefiere el volumen: esta carpeta es relativa a la del compose que administra
+      # Dokploy, no a la suya, y desplegar desde el repositorio vuelve a escribir este
+      # archivo. Descomente y suba el .bak a la carpeta del servidor:
       # - ./respaldo-padron:/respaldo:ro
     healthcheck:
       test:

@@ -68,7 +68,8 @@
     "test:preregistro": "node scripts/probar-preregistro-real.js",
     "test:sin-cedula": "node scripts/probar-sin-cedula.js",
     "test:permisos": "node scripts/probar-permisos.js",
-    "test:reportes": "node scripts/probar-reportes.js"
+    "test:reportes": "node scripts/probar-reportes.js",
+    "padron:comprobar": "node scripts/comprobar-padron.js"
   },
   "keywords": [
     "visitantes",

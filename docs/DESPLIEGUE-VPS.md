@@ -480,7 +480,18 @@ docker stop visitaflow-app
 docker start visitaflow-app
 ```
 
-Y comprueba que están los 7.856.023:
+Y comprueba que quedó bien. Lo mejor es el comprobador del proyecto, que mira todo de
+una vez:
+
+```bash
+npm run padron:comprobar
+```
+
+Dice cuántos ciudadanos hay (tienen que ser **7.856.023**), si la vista `dbo.CIUDADANOS`
+responde, cuántas columnas trae, **si trae fotografías**, cuánto ocupa y si la búsqueda
+por cédula y por apellido funcionan de verdad. Sale con código 1 si algo está mal.
+
+Si prefieres la consulta suelta:
 
 ```bash
 docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "TU_CLAVE" -C -h -1 \
