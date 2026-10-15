@@ -55,7 +55,8 @@
     "desplegar:estado": "node scripts/desplegar-dokploy.js --estado",
     "test:volumen": "node scripts/probar-datos-volumen.js",
     "test:esquema": "node scripts/probar-esquema-nuevo.js",
-    "test:despliegue": "node scripts/probar-despliegue-nuevo.js"
+    "test:despliegue": "node scripts/probar-despliegue-nuevo.js",
+    "config:revisar": "node scripts/revisar-configuracion.js"
   },
   "keywords": [
     "visitantes",
