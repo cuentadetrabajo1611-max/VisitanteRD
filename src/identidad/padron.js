@@ -275,8 +275,56 @@ async function porNombre(texto, limite) {
  * Devuelve el ciudadano si esta en el padron, o un objeto "manual" si no lo
  * esta y la configuracion permite continuar.
  */
-async function resolver({ cedula, nombres, apellidos }) {
+async function resolver({ cedula, nombres, apellidos, nombre_completo }) {
   const digitos = soloDigitos(cedula);
+
+  /* SIN CÉDULA: se resuelve con lo escrito a mano.
+   *
+   * Esto no funcionaba, y el fallo se veía con un mensaje que no tenía nada que ver:
+   * al registrar a alguien sin cédula, el sistema respondía "La cédula debe tener 11
+   * dígitos". La causa es que aquí se validaba la cadena vacía como si fuera una
+   * cédula escrita mal.
+   *
+   * Es el caso más común en una puerta: el visitante no trae la cédula. La institución
+   * decide si eso se admite con el ajuste `exigir_cedula`, que se comprueba ANTES de
+   * llegar aquí. Si se llegó hasta aquí sin cédula, es porque se admite, así que se
+   * sigue con el nombre y queda marcado que no se verificó contra el padrón. */
+  if (!digitos && !nombres && !apellidos && !util.limpiar(nombre_completo, 200)) {
+    return {
+      ok: false,
+      origen: 'sin_datos',
+      motivo: 'Hace falta la cédula o el nombre del visitante.',
+      ciudadano: null,
+    };
+  }
+
+  if (!digitos) {
+    return {
+      ok: true,
+      origen: 'manual',
+      motivo: 'Sin cédula: los datos no se pudieron verificar contra la base de cédulas.',
+      ciudadano: {
+        cedula: '',
+        cedula_formato: '',
+        nombres: nombres || null,
+        apellidos: apellidos || null,
+        /* Se admite el nombre completo escrito de una vez, que es como lo escribe
+           quien tiene a la persona delante. */
+        nombre_completo: [nombres, apellidos].filter(Boolean).join(' ').trim() ||
+          util.limpiar(nombre_completo, 200) || null,
+        fecha_nacimiento: null,
+        edad: null,
+        sexo: null,
+        estado_civil: null,
+        nacionalidad: null,
+        ocupacion: null,
+        municipio: null,
+        provincia: null,
+        en_padron: false,
+      },
+    };
+  }
+
   const revision = validarCedula(digitos);
 
   if (!revision.valida) {

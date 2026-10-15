@@ -487,6 +487,9 @@ async function registrarEntrada(req, datos) {
     cedula,
     nombres: datos.nombres,
     apellidos: datos.apellidos,
+    /* El nombre completo escrito de una vez: es como lo escribe quien tiene a la
+       persona delante, y sin esto el registro sin cédula se quedaba sin nombre. */
+    nombre_completo: datos.nombre_completo,
   });
   if (!resolucion.ok) return { ok: false, motivo: resolucion.motivo };
 
