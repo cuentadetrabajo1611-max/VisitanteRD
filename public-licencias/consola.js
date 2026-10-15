@@ -269,6 +269,37 @@
       '</div></div></div>';
   }
 
+  /**
+   * Resumen de los modulos de una licencia, para la columna de la tabla.
+   *
+   * Antes se mostraban los DOS PRIMEROS por orden alfabetico y unos puntos suspensivos.
+   * El problema es que eso no dice nada util: con "8 de 10", ensenar "api, gafetes…" o
+   * "gafetes, recepcion…" da igual, porque lo que el dueno necesita saber de un vistazo
+   * es QUE LE FALTA a ese cliente respecto a los demas. Dos clientes con 8 de 10 se
+   * veian identicos sin abrirlos uno por uno.
+   *
+   * Ahora se ensena lo que diferencia: si le falta poco, los nombres de lo que le falta;
+   * si le falta mucho, el resumen de que tiene.
+   */
+  function resumenModulos(l) {
+    var activos = l.modulos || [];
+    var todos = estado.modulos || [];
+    var faltan = todos.filter(function (m) { return activos.indexOf(m) === -1; });
+
+    if (!todos.length) return activos.length ? activos.join(', ') : 'ninguno';
+
+    /* Los tiene todos. */
+    if (!faltan.length) return 'completa';
+
+    /* Le falta poco: se dice QUE le falta, que es lo accionable. */
+    if (faltan.length <= 2) return 'sin ' + faltan.join(', ');
+
+    /* Le falta mucho: se ensena lo que si tiene, que es mas corto. */
+    if (activos.length && activos.length <= 3) return activos.join(', ');
+
+    return 'sin ' + faltan.length + ' módulos';
+  }
+
   function fila(l) {
     var vencida = l.dias_restantes <= 0;
     var porVencer = !vencida && l.dias_restantes <= 30;
@@ -293,8 +324,7 @@
       '<td class="texto-chico">' + fecha(l.desde) + '<br>hasta ' + fecha(l.hasta) + '</td>' +
       '<td>' + etiqueta + '</td>' +
       '<td class="texto-chico">' + (l.modulos || []).length + ' de ' + estado.modulos.length + '<br>' +
-      esc((l.modulos || []).slice(0, 2).join(', ') || 'ninguno') +
-      ((l.modulos || []).length > 2 ? '…' : '') + '</td>' +
+      esc(resumenModulos(l)) + '</td>' +
       '<td><div class="tabla__acciones">' +
       '<button class="boton boton--secundario boton--chico" data-renovar="' + esc(l.tenant) + '">Renovar</button>' +
       (l.activa
