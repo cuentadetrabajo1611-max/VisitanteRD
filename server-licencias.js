@@ -55,10 +55,27 @@ function guardarRegistro(lista) {
   fs.writeFileSync(REGISTRO, JSON.stringify(lista, null, 2), { mode: 0o600 });
 }
 
+/**
+ * ¿Esta licencia está activa?
+ *
+ * Se puede desactivar a un cliente desde el panel sin borrar su historial: la
+ * licencia queda suspendida y el sistema del cliente deja de funcionar al
+ * renovar. Es lo que permite cortar el servicio a distancia sin tener que
+ * entrar en el servidor del cliente.
+ *
+ * Las licencias emitidas antes de que existiera este campo no lo traen. Se
+ * toman como activas: si no, al actualizar el servidor se desactivarían solos
+ * todos los clientes que ya estaban trabajando.
+ */
+function estaActiva(entrada) {
+  return entrada.estado !== 'suspendida';
+}
+
 /** Deja constancia de una emision o una renovacion. */
 function anotarEnRegistro(contenido, accion) {
   const lista = leerRegistro();
   const i = lista.findIndex((l) => l.licencia_id === contenido.licencia_id);
+  const anterior = i >= 0 ? lista[i] : null;
   const entrada = {
     licencia_id: contenido.licencia_id,
     tenant: contenido.tenant,
@@ -71,10 +88,27 @@ function anotarEnRegistro(contenido, accion) {
     limites: contenido.limites,
     huella: contenido.huella,
     notas: contenido.notas,
-    historial: (i >= 0 ? lista[i].historial : []).concat([{ accion, fecha: new Date().toISOString() }]),
+    /* El estado lo controla el panel, NO la emision. Si se reescribiera aqui,
+       renovar una licencia reactivaria a un cliente suspendido sin querer. */
+    estado: anterior && anterior.estado ? anterior.estado : 'activa',
+    suspendida_en: anterior ? anterior.suspendida_en || null : null,
+    suspendida_motivo: anterior ? anterior.suspendida_motivo || null : null,
+    historial: (anterior ? anterior.historial : []).concat([{ accion, fecha: new Date().toISOString() }]),
   };
   if (i >= 0) lista[i] = entrada;
   else lista.push(entrada);
+  guardarRegistro(lista);
+  return entrada;
+}
+
+/** Guarda un cambio hecho desde el panel. */
+function actualizarEnRegistro(licenciaId, cambios, accion) {
+  const lista = leerRegistro();
+  const i = lista.findIndex((l) => l.licencia_id === licenciaId);
+  if (i < 0) return null;
+  const entrada = Object.assign({}, lista[i], cambios);
+  entrada.historial = (lista[i].historial || []).concat([{ accion, fecha: new Date().toISOString() }]);
+  lista[i] = entrada;
   guardarRegistro(lista);
   return entrada;
 }
@@ -152,6 +186,16 @@ app.post(
     // La mas reciente por fecha de vencimiento.
     const actual = registros.sort((a, b) => Date.parse(b.hasta) - Date.parse(a.hasta))[0];
 
+    /* Si esta suspendida, se corta aqui.
+       Esto es lo que permite desactivar a un cliente a distancia: su sistema
+       pregunta, se le dice que no, y queda en solo lectura sin perder nada de lo
+       que tenia registrado. El motivo viaja para que se vea en su pantalla de
+       licencia en vez de un "no autorizado" sin explicacion. */
+    if (!estaActiva(actual)) {
+      throw error(403, 'La licencia de esta institución está suspendida.' +
+        (actual.suspendida_motivo ? ' Motivo: ' + actual.suspendida_motivo : ''));
+    }
+
     // Si el cliente ya tiene una licencia con la misma fecha de vencimiento,
     // no hay nada nuevo que mandarle.
     if (licencia_id && actual.licencia_id === licencia_id) {
@@ -190,6 +234,88 @@ app.post(
       licencia_id: actual.licencia_id,
       hasta: actual.hasta,
       estado: lic.evaluar(texto).estado,
+    });
+  })
+);
+
+/**
+ * Activar por ID de licencia.
+ *
+ * ESTA ES LA PUERTA DEL PRIMER ARRANQUE. El cliente instala el sistema, el
+ * sistema le pide el ID (LIC-XXXX), y con ese ID pregunta aqui. Si la licencia
+ * esta activa, se le devuelve firmada y su sistema queda listo: crea su
+ * institucion, sus catalogos y su administrador, sin que nadie tenga que mandar
+ * archivos por correo.
+ *
+ * Es publica a proposito. En el primer arranque no hay sesion (no existe ningun
+ * usuario todavia) y no se puede pedir autenticacion para algo que hay que hacer
+ * antes de poder autenticarse. Lo que la protege es que el ID no se puede
+ * adivinar, y que lo unico que devuelve es la licencia QUE YA ES DE ESE CLIENTE:
+ * conocerla no da acceso a nada sin las credenciales despues.
+ *
+ * Devuelve datos utiles para la pantalla: a que cliente pertenece, hasta cuando
+ * vale y que modulos incluye, para que se vea antes de confirmar.
+ */
+app.post(
+  '/api/licencia/activar-por-id',
+  envolver(async (req, res) => {
+    const id = String((req.body || {}).licencia_id || '').trim().toUpperCase();
+    if (!id) throw error(400, 'Escriba el ID de la licencia.');
+
+    const lista = leerRegistro();
+    // Se busca sin distinguir mayusculas: el cliente lo va a escribir a mano.
+    const entrada = lista.find((l) => String(l.licencia_id || '').toUpperCase() === id);
+
+    if (!entrada) {
+      throw error(404, 'No existe ninguna licencia con el ID ' + id + '. Revise que esté bien escrito.');
+    }
+
+    if (!estaActiva(entrada)) {
+      throw error(403, 'Esa licencia está suspendida.' +
+        (entrada.suspendida_motivo ? ' Motivo: ' + entrada.suspendida_motivo : ''));
+    }
+
+    // Se comprueba que no haya vencido antes de entregarla.
+    const vencida = Date.parse(entrada.hasta) < Date.now();
+    if (vencida) {
+      throw error(403, 'Esa licencia venció el ' + String(entrada.hasta).slice(0, 10) + '. Pida una renovación.');
+    }
+
+    /* La huella, si la licencia esta amarrada a un equipo. Se comprueba aqui y
+       no al renovar, para no entregar una licencia que luego no va a servir. */
+    const huella = String((req.body || {}).huella || '').trim();
+    if (entrada.huella && huella && entrada.huella !== huella) {
+      throw error(403, 'Esta licencia está amarrada a otro equipo.');
+    }
+
+    const texto = lic.firmar(
+      {
+        licencia_id: entrada.licencia_id,
+        tenant: entrada.tenant,
+        cliente: entrada.cliente,
+        contacto: entrada.contacto,
+        desde: entrada.desde,
+        hasta: entrada.hasta,
+        tipo: entrada.tipo,
+        modulos: entrada.modulos,
+        limites: entrada.limites,
+        huella: entrada.huella,
+        notas: entrada.notas,
+      },
+      {}
+    );
+
+    console.log('[licencias] activación por ID: ' + id + ' (' + entrada.cliente + ')');
+
+    responder(res, {
+      licencia: texto,
+      licencia_id: entrada.licencia_id,
+      tenant: entrada.tenant,
+      cliente: entrada.cliente,
+      hasta: entrada.hasta,
+      modulos: entrada.modulos,
+      estado: 'activa',
+      servidor: true,
     });
   })
 );
@@ -426,6 +552,154 @@ app.post(
     if (!archivo) throw error(400, 'Pegue el contenido del archivo de licencia.');
     const evaluacion = lic.evaluar(archivo, {});
     responder(res, { evaluacion, resumen: lic.resumenLegible(evaluacion) });
+  })
+);
+
+/* ------------------------------------------------------------------ */
+/* El panel: activar, suspender y cambiar modulos                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lista de clientes para el panel.
+ *
+ * Devuelve una fila por cliente con lo que hace falta para decidir: quien es,
+ * hasta cuando tiene licencia, cuantos dias le quedan, si esta activo y que
+ * modulos tiene. Los dias se calculan aqui para que el panel no tenga que
+ * hacer cuentas de fechas.
+ */
+app.get(
+  '/api/admin/clientes',
+  admin,
+  envolver(async (req, res) => {
+    const lista = leerRegistro();
+    const ahora = Date.now();
+
+    const clientes = lista.map((l) => ({
+      licencia_id: l.licencia_id,
+      tenant: l.tenant,
+      cliente: l.cliente,
+      contacto: l.contacto || null,
+      tipo: l.tipo || null,
+      desde: l.desde,
+      hasta: l.hasta,
+      vencida: Date.parse(l.hasta) < ahora,
+      dias_restantes: Math.floor((Date.parse(l.hasta) - ahora) / 86400000),
+      activa: estaActiva(l),
+      suspendida_en: l.suspendida_en || null,
+      suspendida_motivo: l.suspendida_motivo || null,
+      modulos: l.modulos || [],
+      limites: l.limites || {},
+      huella: l.huella || null,
+      notas: l.notas || null,
+      revisiones: (l.historial || []).length,
+    }));
+
+    // Primero los que necesitan atencion: suspendidos y por vencer.
+    clientes.sort((a, b) => {
+      if (a.activa !== b.activa) return a.activa ? 1 : -1;
+      return a.dias_restantes - b.dias_restantes;
+    });
+
+    responder(res, {
+      clientes,
+      total: clientes.length,
+      activos: clientes.filter((c) => c.activa && !c.vencida).length,
+      suspendidos: clientes.filter((c) => !c.activa).length,
+      vencidos: clientes.filter((c) => c.vencida).length,
+      // Para que el panel sepa que modulos puede ofrecer al editar.
+      modulos_disponibles: lic.MODULOS,
+    });
+  })
+);
+
+/**
+ * Activa o suspende a un cliente.
+ *
+ * Al suspender se guarda el motivo, y ese motivo llega hasta la pantalla de
+ * licencia del cliente: si le va a dejar de funcionar, mas vale que sepa por que.
+ */
+app.post(
+  '/api/admin/clientes/:licencia/estado',
+  admin,
+  envolver(async (req, res) => {
+    const id = String(req.params.licencia).toUpperCase();
+    const { activa, motivo } = req.body || {};
+
+    const cambios = activa
+      ? { estado: 'activa', suspendida_en: null, suspendida_motivo: null }
+      : {
+          estado: 'suspendida',
+          suspendida_en: new Date().toISOString(),
+          suspendida_motivo: String(motivo || '').trim().slice(0, 200) || null,
+        };
+
+    const entrada = actualizarEnRegistro(
+      id,
+      cambios,
+      activa ? 'reactivada desde el panel' : 'suspendida desde el panel' + (cambios.suspendida_motivo ? ': ' + cambios.suspendida_motivo : '')
+    );
+    if (!entrada) throw error(404, 'No existe la licencia ' + id + '.');
+
+    console.log('[licencias] ' + id + ' -> ' + cambios.estado + (cambios.suspendida_motivo ? ' (' + cambios.suspendida_motivo + ')' : ''));
+
+    responder(res, {
+      licencia_id: entrada.licencia_id,
+      cliente: entrada.cliente,
+      estado: entrada.estado,
+      suspendida_motivo: entrada.suspendida_motivo,
+    });
+  })
+);
+
+/**
+ * Cambia los modulos de un cliente.
+ *
+ * Es lo que permite vender por partes: el mismo sistema, con reportes o sin
+ * ellos. El cambio llega al cliente en la siguiente consulta; no hay que
+ * reinstalar nada.
+ */
+app.post(
+  '/api/admin/clientes/:licencia/modulos',
+  admin,
+  envolver(async (req, res) => {
+    const id = String(req.params.licencia).toUpperCase();
+    const pedidos = Array.isArray((req.body || {}).modulos) ? req.body.modulos : null;
+    if (!pedidos) throw error(400, 'Indique la lista de módulos.');
+
+    // Solo se aceptan modulos que existan: un nombre mal escrito dejaria al
+    // cliente con un modulo que nunca se activa y nadie sabria por que.
+    const desconocidos = pedidos.filter((m) => lic.MODULOS.indexOf(m) === -1);
+    if (desconocidos.length) {
+      throw error(400, 'Estos módulos no existen: ' + desconocidos.join(', ') +
+        '. Los válidos son: ' + lic.MODULOS.join(', ') + '.');
+    }
+
+    const entrada = actualizarEnRegistro(
+      id,
+      { modulos: pedidos.slice() },
+      'módulos cambiados desde el panel: ' + (pedidos.join(', ') || 'ninguno')
+    );
+    if (!entrada) throw error(404, 'No existe la licencia ' + id + '.');
+
+    console.log('[licencias] ' + id + ' módulos -> ' + (pedidos.join(', ') || 'ninguno'));
+
+    responder(res, {
+      licencia_id: entrada.licencia_id,
+      cliente: entrada.cliente,
+      modulos: entrada.modulos,
+    });
+  })
+);
+
+/** El historial de un cliente, para ver que ha pasado con su licencia. */
+app.get(
+  '/api/admin/clientes/:licencia/historial',
+  admin,
+  envolver(async (req, res) => {
+    const id = String(req.params.licencia).toUpperCase();
+    const entrada = leerRegistro().find((l) => String(l.licencia_id).toUpperCase() === id);
+    if (!entrada) throw error(404, 'No existe la licencia ' + id + '.');
+    responder(res, { licencia_id: entrada.licencia_id, cliente: entrada.cliente, historial: entrada.historial || [] });
   })
 );
 

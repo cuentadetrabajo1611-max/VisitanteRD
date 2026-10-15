@@ -151,21 +151,79 @@ VF.paginas.acceso = function (contenedor) {
         '</div></div>' +
         '<div class="tarjeta"><div class="tarjeta__cuerpo">' +
         (esNueva
-          ? '<p class="texto-chico texto-suave">Pegue el contenido del archivo de licencia que le entregó su proveedor. ' +
-            'Se verifica la firma antes de activarlo: si el archivo fue modificado, se rechaza.</p>'
+          ? '<p class="texto-chico texto-suave">Escriba el ID de la licencia que le entregaron. ' +
+            'El sistema la pide al servidor, verifica la firma y queda activado. ' +
+            'Si le dieron el archivo <span class="texto-mono">.vflow</span>, puede pegarlo abajo.</p>'
           : '<div class="aviso aviso--aviso">' + VF.icono.svg('alerta') +
-            '<div class="texto-chico">La licencia no permitió crear la institución. Puede volver a activarla con un archivo válido.</div></div>') +
-        '<div class="campo"><label class="campo__etiqueta" for="archivo-lic">Archivo de licencia (.vflow)</label>' +
-        '<input class="entrada" type="file" id="archivo-lic" accept=".vflow,.txt">' +
-        '<div class="campo__ayuda">O pegue el contenido abajo.</div></div>' +
-        '<div class="campo"><textarea class="area entrada--mono" id="texto-lic" rows="7" ' +
-        'placeholder="-----BEGIN VISITAFLOW LICENSE-----"></textarea></div>' +
+            '<div class="texto-chico">La licencia no permitió crear la institución. Puede volver a activarla.</div></div>') +
+
+        /* Primero el ID, que es lo cómodo. El archivo queda como alternativa,
+           porque hay clientes sin salida a Internet que lo necesitan. */
+        '<div class="campo"><label class="campo__etiqueta" for="id-lic">ID de la licencia</label>' +
+        '<input class="entrada entrada--grande entrada--mono" id="id-lic" placeholder="LIC-XXXXXXXX" ' +
+        'autocomplete="off" spellcheck="false" autocapitalize="characters"></div>' +
         '<div id="error-lic" hidden></div>' +
-        '<button class="boton boton--bloque boton--grande" id="activar-lic">Activar</button>' +
+        '<button class="boton boton--bloque boton--grande" id="activar-id">Activar con el ID</button>' +
+
+        '<details class="mt-2"><summary class="texto-chico" style="cursor:pointer">' +
+        'Tengo el archivo de licencia (.vflow) en vez del ID</summary>' +
+        '<div class="mt-1">' +
+        '<div class="campo"><input class="entrada" type="file" id="archivo-lic" accept=".vflow,.txt">' +
+        '<div class="campo__ayuda">O pegue el contenido aquí abajo.</div></div>' +
+        '<div class="campo"><textarea class="area entrada--mono" id="texto-lic" rows="6" ' +
+        'placeholder="-----BEGIN VISITAFLOW LICENSE-----"></textarea></div>' +
+        '<button class="boton boton--secundario boton--bloque" id="activar-lic">Activar con el archivo</button>' +
+        '</div></details>' +
+
         '</div></div>' +
         '<div class="acceso__pie">VisitaFlow · el sistema funciona sin Internet una vez activado</div>' +
         '</div></div>';
 
+      const errorLic = () => document.getElementById('error-lic');
+
+      /** Muestra un error de activación de forma que se entienda. */
+      function mostrarError(titulo, texto) {
+        const error = errorLic();
+        error.hidden = false;
+        error.className = 'aviso aviso--peligro';
+        error.innerHTML = VF.icono.svg('alerta') + '<div><strong>' + VF.ui.esc(titulo) + '</strong><div>' +
+          VF.ui.esc(texto) + '</div></div>';
+      }
+
+      /* --- Activar con el ID: el camino normal --- */
+      const campoId = document.getElementById('id-lic');
+      const botonId = document.getElementById('activar-id');
+
+      async function activarPorId() {
+        const id = campoId.value.trim();
+        if (!id) {
+          campoId.focus();
+          mostrarError('Falta el ID', 'Escriba el ID que le entregaron, con el formato LIC-XXXXXXXX.');
+          return;
+        }
+
+        errorLic().hidden = true;
+        botonId.disabled = true;
+        botonId.textContent = 'Consultando al servidor…';
+
+        try {
+          const r = await VF.api.post('/api/licencia/activar-id', { licencia_id: id }, { sinRedirigir: true });
+          VF.ui.aviso('exito', 'Sistema activado',
+            (r.cliente ? r.cliente + '. ' : '') + 'La institución quedó creada. Ya puede entrar con su usuario.');
+          // El servidor crea la institución y el administrador al arrancar.
+          setTimeout(() => location.reload(), 1500);
+        } catch (e) {
+          mostrarError('No se pudo activar', e.message);
+          botonId.disabled = false;
+          botonId.textContent = 'Activar con el ID';
+          campoId.select();
+        }
+      }
+
+      botonId.addEventListener('click', activarPorId);
+      campoId.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') activarPorId(); });
+
+      /* --- Activar con el archivo: para quien no tiene salida a Internet --- */
       document.getElementById('archivo-lic').addEventListener('change', (ev) => {
         const f = ev.target.files[0];
         if (!f) return;
@@ -176,14 +234,11 @@ VF.paginas.acceso = function (contenedor) {
 
       document.getElementById('activar-lic').addEventListener('click', async () => {
         const texto = document.getElementById('texto-lic').value.trim();
-        const error = document.getElementById('error-lic');
         const boton = document.getElementById('activar-lic');
-        error.hidden = true;
+        errorLic().hidden = true;
 
         if (!texto) {
-          error.hidden = false;
-          error.className = 'aviso aviso--aviso';
-          error.innerHTML = VF.icono.svg('alerta') + '<div>Pegue el contenido de la licencia.</div>';
+          mostrarError('Falta el archivo', 'Pegue el contenido de la licencia o elija el archivo .vflow.');
           return;
         }
 
@@ -192,15 +247,11 @@ VF.paginas.acceso = function (contenedor) {
         try {
           await VF.api.post('/api/licencia/activar', { texto }, { sinRedirigir: true });
           VF.ui.aviso('exito', 'Licencia activada', 'La institución quedó creada. Ya puede entrar con su usuario.');
-          // Las credenciales del administrador las deja el servidor al arrancar.
           setTimeout(() => location.reload(), 1200);
         } catch (e) {
-          error.hidden = false;
-          error.className = 'aviso aviso--peligro';
-          error.innerHTML = VF.icono.svg('alerta') + '<div><strong>No se pudo activar</strong><div>' +
-            VF.ui.esc(e.message) + '</div></div>';
+          mostrarError('No se pudo activar', e.message);
           boton.disabled = false;
-          boton.textContent = 'Activar';
+          boton.textContent = 'Activar con el archivo';
         }
       });
     }

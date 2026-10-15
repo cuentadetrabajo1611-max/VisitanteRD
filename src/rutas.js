@@ -367,6 +367,56 @@ function rutas(ctx) {
   /* ================================================================== */
 
   /**
+   * Activar con el ID de la licencia.
+   *
+   * Es la via del primer arranque: el cliente instala el sistema, escribe el ID
+   * que le dieron y el sistema pide la licencia al servidor. No hay que mandar
+   * ningun archivo por correo.
+   *
+   * Publica por la misma razon que la activacion por archivo: en una instalacion
+   * vacia no existe ningun usuario con el que autenticarse, asi que exigir sesion
+   * la bloquearia para siempre. Lo que entra es un ID que el servidor valida.
+   */
+  r.post(
+    '/licencia/activar-id',
+    asincrono(async (req, res) => {
+      const id = util.limpiar(req.body && req.body.licencia_id, 60);
+      if (!id) throw error(400, 'Escriba el ID de la licencia.');
+
+      const primerArranque = await auth.esPrimerArranque();
+
+      /* Si la instalacion YA tiene institucion, activar es un cambio de
+         licencia y eso si exige sesion y permiso: no puede hacerlo cualquiera
+         que llegue a la red. */
+      if (!primerArranque) {
+        await new Promise((listo, falla) => {
+          conSesion(req, res, () => permiso('licencia.activar')(req, res, (e) => (e ? falla(e) : listo())));
+        });
+      }
+
+      const resultado = await gestor.activarPorId(id);
+
+      await auditoria.anotar(req, 'licencia.activar', {
+        entidad: 'licencia',
+        entidad_id: id,
+        detalle: (primerArranque ? '[primer arranque] ' : '') +
+          (resultado.ok ? 'Activada por ID: ' + (resultado.cliente || '') : 'Rechazada: ' + resultado.motivo),
+      });
+
+      if (!resultado.ok) throw error(resultado.sinServidor || resultado.sinConexion ? 503 : 400, resultado.motivo);
+
+      responder(res, {
+        licencia: gestor.estado(),
+        cliente: resultado.cliente || null,
+        hasta: resultado.hasta || null,
+        // Si es el primer arranque, el sistema acaba de crear su institucion,
+        // sus catalogos y su administrador. Conviene decirlo.
+        primer_arranque: primerArranque,
+      });
+    })
+  );
+
+  /**
    * Estado para la pantalla de acceso: dice si la instalacion esta VACIA.
    *
    * Es publica a proposito: la pantalla de acceso necesita saber si mostrar el

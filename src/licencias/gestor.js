@@ -413,6 +413,110 @@ async function renovarDesdeServidor() {
   }
 }
 
+/**
+ * Activa el sistema con el ID de la licencia.
+ *
+ * ESTA ES LA PUERTA DEL PRIMER ARRANQUE. El cliente instala el sistema y lo
+ * unico que tiene es un ID (LIC-XXXX). Con ese ID se pregunta al servidor de
+ * licencias, que devuelve la licencia firmada de ESE cliente, y a partir de ahi
+ * el sistema crea su institucion, sus catalogos y su administrador.
+ *
+ * Antes de esto habia que mandarle al cliente un archivo .vflow por correo y que
+ * lo pegara a mano. Con el ID no hace falta ningun archivo: se escribe el ID y
+ * ya esta.
+ *
+ * Casos que hay que distinguir bien, porque el cliente esta mirando la pantalla:
+ *
+ *   - No hay servidor configurado  -> se lo decimos, y que use el archivo.
+ *   - El ID no existe              -> el servidor lo dice.
+ *   - Esta suspendido              -> el servidor manda el motivo, y se muestra:
+ *                                     "no funciona" sin explicacion es lo peor
+ *                                     que se le puede decir a alguien.
+ *   - El servidor no responde      -> se puede seguir con el archivo .vflow.
+ */
+async function activarPorId(licenciaId) {
+  const id = String(licenciaId || '').trim().toUpperCase();
+  if (!id) return { ok: false, motivo: 'Escriba el ID de la licencia.' };
+
+  if (!config.licencia.servidor) {
+    return {
+      ok: false,
+      motivo: 'Esta instalación no tiene configurado el servidor de licencias. ' +
+        'Puede activarla pegando el archivo .vflow, o pida que le configuren LICENCIA_SERVIDOR.',
+      sinServidor: true,
+    };
+  }
+
+  const url = config.licencia.servidor.replace(/\/+$/, '') + '/api/licencia/activar-por-id';
+
+  let respuesta;
+  try {
+    respuesta = await pedir(url, JSON.stringify({ licencia_id: id, huella: huella(), equipo: descripcionEquipo() }));
+  } catch (e) {
+    return {
+      ok: false,
+      motivo: 'No se pudo contactar el servidor de licencias (' + e.message + '). ' +
+        'Compruebe la conexión, o active el sistema pegando el archivo .vflow.',
+      sinConexion: true,
+    };
+  }
+
+  if (!respuesta.ok) {
+    // El servidor explica por que: ID inexistente, suspendida, vencida...
+    return { ok: false, motivo: respuesta.motivo || 'El servidor rechazó esa licencia.', rechazada: true };
+  }
+
+  const datos = respuesta.datos || {};
+  if (!datos.licencia) return { ok: false, motivo: 'El servidor no devolvió ninguna licencia.' };
+
+  // Se activa igual que si viniera de un archivo: misma verificacion de firma,
+  // mismo guardado, mismo registro en la base. No hay dos caminos distintos.
+  const resultado = await activar(datos.licencia, 'servidor:id');
+
+  if (resultado.ok) {
+    // Se deja copia del ID para poder renovar despues sin volver a pedirlo.
+    try {
+      await guardarIdDeLicencia(id);
+    } catch (e) {
+      /* si no se puede guardar el ID, la licencia ya quedo activada igual */
+    }
+  }
+
+  return Object.assign({}, resultado, {
+    licencia_id: datos.licencia_id || id,
+    cliente: datos.cliente || null,
+    hasta: datos.hasta || null,
+  });
+}
+
+/** Deja el ID anotado, para poder renovar despues sin volver a pedirlo. */
+async function guardarIdDeLicencia(id) {
+  await bd.consultar(
+    `MERGE vf_ajustes AS destino
+       USING (SELECT @tenant_id AS tenant_id, 'licencia_id' AS clave) AS origen
+          ON destino.tenant_id = origen.tenant_id AND destino.clave = origen.clave
+     WHEN MATCHED THEN UPDATE SET valor = @valor
+     WHEN NOT MATCHED THEN INSERT (tenant_id, clave, valor) VALUES (@tenant_id, 'licencia_id', @valor);`,
+    { tenant_id: estadoActual.contenido ? await idDeTenant(estadoActual.contenido.tenant) : null, valor: id }
+  );
+}
+
+/** El id interno de una institucion por su codigo. */
+async function idDeTenant(codigo) {
+  const r = await bd.consultar('SELECT id FROM vf_tenants WHERE codigo = @c', { c: codigo });
+  return r.recordset.length ? r.recordset[0].id : null;
+}
+
+/** El ID de licencia guardado en esta instalacion, si lo hay. */
+async function idGuardado() {
+  try {
+    const r = await bd.consultar("SELECT TOP 1 valor FROM vf_ajustes WHERE clave = 'licencia_id' ORDER BY id DESC");
+    return r.recordset.length ? r.recordset[0].valor : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** Peticion HTTP sin dependencias externas. */
 function pedir(url, cuerpo) {
   return new Promise((resolve, reject) => {
@@ -504,6 +608,8 @@ module.exports = {
   estadoInterno,
   tieneModulo,
   activar,
+  activarPorId,
+  idGuardado,
   renovarDesdeServidor,
   vigilar,
   MODULOS: lic.MODULOS,

@@ -147,16 +147,25 @@
   /* Pantalla principal                                                  */
   /* ------------------------------------------------------------------ */
 
-  var estado = { licencias: [], modulos: [], keyId: null, filtro: '' };
+  var estado = { licencias: [], modulos: [], keyId: null, filtro: '', resumen: {} };
 
   function cargar() {
     app.innerHTML = '<div class="cargando"><div class="girador"></div><span>Cargando…</span></div>';
 
-    Promise.all([pedir('GET', '/api/salud'), pedir('GET', '/api/admin/licencias')])
+    /* La lista de clientes viene del panel nuevo, que trae lo que hace falta
+       para decidir (días restantes ya calculados, si está activo, sus módulos)
+       y los totales. Antes se armaba con /api/admin/licencias, que devuelve el
+       registro crudo y obligaba al navegador a hacer las cuentas. */
+    Promise.all([pedir('GET', '/api/salud'), pedir('GET', '/api/admin/clientes')])
       .then(function (r) {
-        estado.modulos = r[0].modulos || [];
         estado.keyId = r[0].llave ? r[0].llave.key_id : null;
-        estado.licencias = r[1].licencias || [];
+        estado.licencias = r[1].clientes || [];
+        estado.modulos = r[1].modulos_disponibles || r[0].modulos || [];
+        estado.resumen = {
+          activos: r[1].activos || 0,
+          suspendidos: r[1].suspendidos || 0,
+          vencidos: r[1].vencidos || 0,
+        };
         pintar();
       })
       .catch(function (e) {
@@ -208,7 +217,7 @@
           '<span class="crecer"></span></div>' +
           (lista.length
             ? '<div class="tabla-envoltura"><table class="tabla"><thead><tr>' +
-              '<th>Institución</th><th>Cliente</th><th>Vigencia</th><th>Días</th><th>Límites</th><th>Equipos</th><th></th>' +
+              '<th>Institución</th><th>Cliente</th><th>Vigencia</th><th>Estado</th><th>Módulos</th><th></th>' +
               '</tr></thead><tbody>' +
               lista.map(fila).join('') +
               '</tbody></table></div>'
@@ -227,7 +236,7 @@
         // Se repinta solo la tabla, para no perder el foco del buscador.
         var t = document.querySelector('.tabla-envoltura');
         if (t) t.outerHTML = '<div class="tabla-envoltura"><table class="tabla"><thead><tr>' +
-          '<th>Institución</th><th>Cliente</th><th>Vigencia</th><th>Días</th><th>Límites</th><th>Equipos</th><th></th>' +
+          '<th>Institución</th><th>Cliente</th><th>Vigencia</th><th>Estado</th><th>Módulos</th><th></th>' +
           '</tr></thead><tbody>' + estado.licencias.filter(function (l) {
             var f = estado.filtro.toLowerCase();
             return !f || (l.tenant || '').indexOf(f) !== -1 || (l.cliente || '').toLowerCase().indexOf(f) !== -1;
@@ -263,26 +272,36 @@
   function fila(l) {
     var vencida = l.dias_restantes <= 0;
     var porVencer = !vencida && l.dias_restantes <= 30;
-    var etiqueta = vencida
+    /* El estado manda sobre los días: un cliente suspendido con licencia
+       vigente no puede operar, y eso hay que verlo de un vistazo. */
+    var etiqueta = !l.activa
+      ? '<span class="etiqueta etiqueta--peligro">Suspendida</span>'
+      : vencida
       ? '<span class="etiqueta etiqueta--peligro">Vencida</span>'
       : porVencer
       ? '<span class="etiqueta etiqueta--alerta">' + l.dias_restantes + ' días</span>'
       : '<span class="etiqueta etiqueta--bien">' + l.dias_restantes + ' días</span>';
 
-    return '<tr>' +
+    return '<tr' + (l.activa ? '' : ' style="opacity:.65"') + '>' +
       '<td><div class="tabla__principal texto-mono">' + esc(l.tenant) + '</div>' +
-      '<div class="tabla__secundario">' + esc(l.tipo || '') +
-      (l.huella ? ' · amarrada a un equipo' : '') + '</div></td>' +
+      '<div class="tabla__secundario texto-mono">' + esc(l.licencia_id || '') + '</div></td>' +
       '<td><div>' + esc(l.cliente || '—') + '</div>' +
-      (l.instalaciones && l.instalaciones.length
-        ? '<div class="tabla__secundario">' + l.instalaciones.length + ' equipo(s) activado(s)</div>'
-        : '<div class="tabla__secundario">sin activar</div>') + '</td>' +
+      (l.contacto ? '<div class="tabla__secundario">' + esc(l.contacto) + '</div>' : '') +
+      (!l.activa && l.suspendida_motivo
+        ? '<div class="tabla__secundario" style="color:var(--peligro)">' + esc(l.suspendida_motivo) + '</div>'
+        : '') + '</td>' +
       '<td class="texto-chico">' + fecha(l.desde) + '<br>hasta ' + fecha(l.hasta) + '</td>' +
       '<td>' + etiqueta + '</td>' +
-      '<td class="texto-chico">' + (l.limites ? l.limites.usuarios + ' usuarios<br>' + l.limites.instalaciones + ' equipo(s)' : '—') + '</td>' +
-      '<td class="texto-chico">' + ((l.instalaciones || []).length || '—') + '</td>' +
+      '<td class="texto-chico">' + (l.modulos || []).length + ' de ' + estado.modulos.length + '<br>' +
+      esc((l.modulos || []).slice(0, 2).join(', ') || 'ninguno') +
+      ((l.modulos || []).length > 2 ? '…' : '') + '</td>' +
       '<td><div class="tabla__acciones">' +
       '<button class="boton boton--secundario boton--chico" data-renovar="' + esc(l.tenant) + '">Renovar</button>' +
+      (l.activa
+        ? '<button class="boton boton--fantasma boton--chico" data-suspender="' + esc(l.licencia_id) + '" title="Suspender">⏸</button>'
+        : '<button class="boton boton--fantasma boton--chico" data-activar="' + esc(l.licencia_id) + '" title="Reactivar">▶</button>') +
+      '<button class="boton boton--fantasma boton--chico" data-modulos="' + esc(l.licencia_id) + '" title="Elegir módulos">☰</button>' +
+      '<button class="boton boton--fantasma boton--chico" data-historial="' + esc(l.licencia_id) + '" title="Historial">🕘</button>' +
       '<button class="boton boton--fantasma boton--chico" data-archivo="' + esc(l.tenant) + '" title="Descargar archivo">↓</button>' +
       '<button class="boton boton--fantasma boton--chico" data-ver="' + esc(l.tenant) + '" title="Ver detalle">👁</button>' +
       '</div></td></tr>';
@@ -298,8 +317,108 @@
     document.querySelectorAll('[data-ver]').forEach(function (b) {
       b.addEventListener('click', function () { verDetalle(b.dataset.ver); });
     });
+    document.querySelectorAll('[data-suspender]').forEach(function (b) {
+      b.addEventListener('click', function () { formularioSuspender(b.dataset.suspender); });
+    });
+    document.querySelectorAll('[data-activar]').forEach(function (b) {
+      b.addEventListener('click', function () { cambiarEstado(b.dataset.activar, true, null); });
+    });
+    document.querySelectorAll('[data-modulos]').forEach(function (b) {
+      b.addEventListener('click', function () { formularioModulos(b.dataset.modulos); });
+    });
+    document.querySelectorAll('[data-historial]').forEach(function (b) {
+      b.addEventListener('click', function () { verHistorial(b.dataset.historial); });
+    });
     var nv = document.getElementById('nueva-vacia');
     if (nv) nv.addEventListener('click', function () { formularioNueva(); });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Suspender, reactivar y modulos                                      */
+  /* ------------------------------------------------------------------ */
+
+  /** El cliente que corresponde a un ID de licencia. */
+  function clienteDe(licenciaId) {
+    return estado.licencias.filter(function (l) { return l.licencia_id === licenciaId; })[0] || null;
+  }
+
+  function cambiarEstado(licenciaId, activa, motivo) {
+    pedir('POST', '/api/admin/clientes/' + encodeURIComponent(licenciaId) + '/estado', {
+      activa: activa,
+      motivo: motivo,
+    })
+      .then(function (r) {
+        aviso(activa ? 'exito' : 'aviso',
+          activa ? 'Cliente reactivado' : 'Cliente suspendido',
+          activa
+            ? (r.cliente || '') + ' ya puede activar y renovar su licencia.'
+            : (r.cliente || '') + ' dejará de poder activar y renovar. Su sistema queda en solo lectura, sin perder nada de lo registrado.');
+        cargar();
+      })
+      .catch(function (e) { aviso('peligro', 'No se pudo cambiar el estado', e.message); });
+  }
+
+  function formularioSuspender(licenciaId) {
+    var c = clienteDe(licenciaId);
+    var dlg = dialogo('Suspender a ' + (c ? c.cliente : licenciaId),
+      '<p>Al suspender, el sistema del cliente deja de poder activar y renovar su licencia.' +
+      ' <strong>No se borra nada</strong>: su historial de visitas queda intacto y se puede reactivar cuando quiera.</p>' +
+      '<div class="campo"><label class="campo__etiqueta" for="motivo">Motivo (se le mostrará al cliente)</label>' +
+      '<input class="entrada" id="motivo" placeholder="Por ejemplo: factura de marzo sin pagar" maxlength="200"></div>',
+      '<button class="boton boton--secundario" data-cerrar>Cancelar</button>' +
+      '<button class="boton boton--peligro" id="confirmar">Suspender</button>');
+
+    dlg.querySelector('#confirmar').addEventListener('click', function () {
+      cambiarEstado(licenciaId, false, dlg.querySelector('#motivo').value.trim() || null);
+      dlg.close();
+    });
+  }
+
+  function formularioModulos(licenciaId) {
+    var c = clienteDe(licenciaId);
+    if (!c) return;
+    var activos = c.modulos || [];
+    var faltan = estado.modulos.filter(function (m) { return activos.indexOf(m) === -1; });
+
+    var dlg = dialogo('Módulos de ' + c.cliente,
+      '<p>Marque lo que incluye la licencia de este cliente. El cambio llega a su sistema en la siguiente consulta; no hay que reinstalar nada.</p>' +
+      '<div class="rejilla" style="gap:.4rem">' +
+      estado.modulos.map(function (m) {
+        return '<label class="campo campo--interruptor"><input type="checkbox" class="interruptor" data-modulo="' + esc(m) + '"' +
+          (activos.indexOf(m) !== -1 ? ' checked' : '') + '><span class="texto-mono">' + esc(m) + '</span></label>';
+      }).join('') +
+      '</div>' +
+      (faltan.length ? '<p class="texto-chico texto-tenue mt-2">Sin incluir: ' + esc(faltan.join(', ')) + '</p>' : ''),
+      '<button class="boton boton--secundario" data-cerrar>Cancelar</button>' +
+      '<button class="boton" id="guardar-modulos">Guardar</button>');
+
+    dlg.querySelector('#guardar-modulos').addEventListener('click', function () {
+      var elegidos = [];
+      dlg.querySelectorAll('[data-modulo]').forEach(function (n) {
+        if (n.checked) elegidos.push(n.dataset.modulo);
+      });
+      pedir('POST', '/api/admin/clientes/' + encodeURIComponent(licenciaId) + '/modulos', { modulos: elegidos })
+        .then(function () {
+          aviso('exito', 'Módulos actualizados', elegidos.length + ' módulo(s) para ' + c.cliente + '.');
+          cargar();
+        })
+        .catch(function (e) { aviso('peligro', 'No se pudieron guardar', e.message); });
+      dlg.close();
+    });
+  }
+
+  function verHistorial(licenciaId) {
+    pedir('GET', '/api/admin/clientes/' + encodeURIComponent(licenciaId) + '/historial')
+      .then(function (r) {
+        dialogo('Historial de ' + (r.cliente || licenciaId),
+          (r.historial || []).length
+            ? '<div class="tabla-envoltura"><table class="tabla"><thead><tr><th>Fecha</th><th>Qué pasó</th></tr></thead><tbody>' +
+              r.historial.slice().reverse().map(function (h) {
+                return '<tr><td class="texto-chico">' + fecha(h.fecha, true) + '</td><td>' + esc(h.accion) + '</td></tr>';
+              }).join('') + '</tbody></table></div>'
+            : '<p>No hay nada anotado todavía.</p>');
+      })
+      .catch(function (e) { aviso('peligro', 'No se pudo leer el historial', e.message); });
   }
 
   /* ------------------------------------------------------------------ */
