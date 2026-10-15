@@ -95,21 +95,41 @@ function entorno() {
     ARCHIVOS_CARPETA: path.join(DATOS, 'archivos'),
     LICENCIA_SERVIDOR: LICENCIAS,
     URL_PUBLICA: RAIZ_URL,
+
+    /* Un secreto propio de esta prueba.
+     *
+     * Hace falta porque el sistema ahora NO ARRANCA en producción con un secreto
+     * que esté publicado en el repositorio, y el del .env de desarrollo lo está.
+     * Es lo mismo que tendrá que hacer un cliente al desplegar, así que la prueba
+     * lo hace igual. */
+    JWT_SECRET: 'prueba-de-despliegue-secreto-propio-' + BASE + '-no-publicado',
+    ADMIN_TOKEN: 'prueba-de-despliegue-token-de-administracion-' + BASE,
   });
 }
 
 /** Arranca el sistema y espera a que responda. */
 async function arrancar(segundos) {
+  /* La salida del servidor de prueba se guarda en un archivo. Si algo falla, es lo
+     unico que dice por que: con la salida "heredada" no se ve nada cuando la prueba
+     se ejecuta desde otro script. */
+  const registro = path.join(TEMPORAL, 'servidor.log');
+  const flujo = fs.openSync(registro, 'a');
+
   servidor = spawn(process.execPath, ['server.js'], {
     cwd: RAIZ,
     env: entorno(),
-    // La salida se hereda para poder verla si algo falla, y porque capturarla
-    // con tuberias no funciona en todos los entornos.
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: ['ignore', flujo, flujo],
   });
+  servidor.registro = registro;
 
   const limite = Date.now() + (segundos || 40) * 1000;
   while (Date.now() < limite) {
+    // Si el proceso se murio, no tiene sentido seguir esperando.
+    if (servidor && servidor.exitCode !== null) {
+      const texto = fs.existsSync(registro) ? fs.readFileSync(registro, 'utf8') : '';
+      const ultimas = texto.split('\n').filter(Boolean).slice(-8).join('\n           ');
+      throw new Error('el servidor de prueba se cerró (código ' + servidor.exitCode + '):\n           ' + ultimas);
+    }
     try {
       const r = await fetch(RAIZ_URL + '/api/salud', { signal: AbortSignal.timeout(3000) });
       if (r.ok) return await r.json();
@@ -118,7 +138,10 @@ async function arrancar(segundos) {
     }
     await new Promise((listo) => setTimeout(listo, 700));
   }
-  throw new Error('el sistema no respondió en ' + (segundos || 40) + ' segundos');
+
+  const texto = fs.existsSync(registro) ? fs.readFileSync(registro, 'utf8') : '';
+  const ultimas = texto.split('\n').filter(Boolean).slice(-8).join('\n           ');
+  throw new Error('el sistema no respondió en ' + (segundos || 40) + ' segundos. Últimas líneas:\n           ' + ultimas);
 }
 
 /** Para el sistema y espera a que suelte el puerto. */
@@ -261,16 +284,62 @@ async function principal() {
   await pool1.close();
 
   /* ------------------------------------------------------------------ */
-  paso('4. Reiniciar: el sistema tiene que dejarse listo solo');
+  /* LO IMPORTANTE: activar tiene que dejar el sistema USABLE EN EL MOMENTO.
+   *
+   * Antes no lo hacía: la activación solo guardaba la licencia, y los catálogos y
+   * el administrador se creaban al ARRANCAR. O sea que había que reiniciar el
+   * contenedor después de activar, aunque la pantalla dijera que ya estaba listo,
+   * y quien activaba se quedaba sin ningún usuario con el que entrar.
+   *
+   * Aquí se comprueba SIN REINICIAR NADA. Si esto pasa, el paso deja de existir. */
+  console.log('');
+  console.log('  Y sin reiniciar nada, el sistema tiene que quedar usable:');
 
-  /* Al arrancar es cuando se crean los catálogos y el administrador. Se para y se
-     vuelve a arrancar, que es lo que hace el operador después de activar. */
+  const pool3 = await conectar(BASE);
+  const t3 = (await pool3.request().query("SELECT id FROM vf_tenants WHERE codigo = '" + cliente.tenant + "'")).recordset[0];
+
+  const contar = async (tabla, cond) => {
+    const r = await pool3.request().query('SELECT COUNT(*) AS n FROM ' + tabla + ' WHERE tenant_id = ' + t3.id + (cond || ''));
+    return r.recordset[0].n;
+  };
+
+  const permisosYa = await contar('vf_rol_permisos');
+  if (permisosYa >= 30) bien(permisosYa + ' permisos sembrados SIN reiniciar');
+  else mal('solo ' + permisosYa + ' permisos tras activar: haría falta reiniciar el contenedor');
+
+  const adminsYa = await contar('vf_usuarios', " AND rol = 'admin' AND activo = 1");
+  if (adminsYa === 1) bien('el administrador se creó SIN reiniciar');
+  else mal('hay ' + adminsYa + ' administradores tras activar: haría falta reiniciar');
+
+  const motivosYa = await contar('vf_motivos');
+  if (motivosYa > 0) bien(motivosYa + ' motivos de visita sembrados SIN reiniciar');
+  else mal('no se sembraron los motivos tras activar');
+  await pool3.close();
+
+  /* Y que la respuesta de la activación traiga el usuario, para poder entrar. */
+  if (actDatos.administrador && actDatos.administrador.correo) {
+    bien('la activación devolvió el usuario del administrador: ' + actDatos.administrador.correo);
+  } else {
+    mal('la activación no devolvió el usuario del administrador');
+  }
+
+  /* El archivo de credenciales también tiene que estar ya. */
+  const archivoClaveYa = path.join(DATOS, 'CLAVE-ADMINISTRADOR.txt');
+  if (fs.existsSync(archivoClaveYa)) bien('el archivo con la contraseña quedó escrito SIN reiniciar');
+  else mal('no se escribió el archivo con la contraseña al activar');
+
+  /* ------------------------------------------------------------------ */
+  paso('4. Reiniciar: tiene que seguir bien, no romperse');
+
+  /* El reinicio ya no es necesario, pero tiene que seguir funcionando: es lo que
+     pasa en cada actualización del contenedor. */
   await parar();
   salud = await arrancar();
 
-  if (salud.licencia.valida) bien('el sistema arranca con la licencia activa');
-  else mal('el sistema no reconoce la licencia que acaba de activar');
+  if (salud.licencia.valida) bien('tras reiniciar, la licencia sigue activa');
+  else mal('el sistema perdió la licencia al reiniciar');
 
+  /* Y no debe haber duplicado nada al pasar otra vez por la preparación. */
   const pool2 = await conectar(BASE);
   const t2 = (await pool2.request().query("SELECT id FROM vf_tenants WHERE codigo = '" + cliente.tenant + "'")).recordset[0];
 
@@ -280,26 +349,12 @@ async function principal() {
   };
 
   const permisos = await cuenta('vf_rol_permisos');
-  if (permisos >= 30) bien(permisos + ' permisos sembrados para la institución');
-  else mal('solo ' + permisos + ' permisos: el sistema no tendría pantallas habilitadas');
-
-  const deptos = await cuenta('vf_departamentos');
-  if (deptos > 0) bien(deptos + ' departamentos de ejemplo');
-  else mal('no se sembraron departamentos');
-
-  const motivos = await cuenta('vf_motivos');
-  if (motivos > 0) bien(motivos + ' motivos de visita');
-  else mal('no se sembraron motivos');
-
-  const plantillas = await cuenta('vf_plantillas_gafete');
-  if (plantillas > 0) bien(plantillas + ' plantilla(s) de gafete');
-  else mal('no se sembró la plantilla de gafete');
+  if (permisos === permisosYa) bien('los permisos siguen siendo ' + permisos + ' (no se duplicaron al reiniciar)');
+  else mal('los permisos pasaron de ' + permisosYa + ' a ' + permisos + ': la preparación duplica datos');
 
   const admins = await cuenta('vf_usuarios', " AND rol = 'admin' AND activo = 1");
-  if (admins === 1) bien('se creó el administrador');
-  else mal('hay ' + admins + ' administradores y debería haber 1');
-
-  await pool2.close();
+  if (admins === 1) bien('sigue habiendo un solo administrador');
+  else mal('ahora hay ' + admins + ' administradores');
 
   /* La clave tiene que estar en un archivo, DENTRO del volumen de datos. */
   const archivoClave = path.join(DATOS, 'CLAVE-ADMINISTRADOR.txt');

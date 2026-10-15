@@ -181,6 +181,41 @@ function nuevoSecreto() {
   return crypto.randomBytes(36).toString('base64').replace(/[+/=]/g, '');
 }
 
+/**
+ * Una clave de SQL Server que COMPLECE la politica de complejidad.
+ *
+ * Tomar bytes al azar en base64 y quitarles los simbolos daba claves que SQL Server
+ * rechaza SIEMPRE: de 2000 generadas, 2000 salieron sin ningun simbolo. El
+ * contenedor de la base arranca y se muere en bucle, y el sintoma que se ve es que
+ * la aplicacion no conecta, que apunta a otro sitio.
+ *
+ * Se arma por partes para garantizar mayuscula, minuscula, numero y simbolo. Los
+ * simbolos son los que no rompen nada: ni comillas (romperian el .env y la linea de
+ * comandos), ni la barra invertida ni el dolar (los interpreta el shell).
+ */
+function nuevaClaveSql() {
+  const MAYUS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const MINUS = 'abcdefghijkmnopqrstuvwxyz';
+  const NUMS = '23456789';
+  const SIMB = '!@#%^*-_=+';
+
+  const todos = MAYUS + MINUS + NUMS + SIMB;
+  const elegir = (juego) => juego[crypto.randomInt(juego.length)];
+
+  const parte = [
+    elegir(MAYUS), elegir(MINUS), elegir(NUMS), elegir(SIMB),
+    elegir(MAYUS), elegir(MINUS), elegir(NUMS), elegir(SIMB),
+  ];
+  while (parte.length < 32) parte.push(elegir(todos));
+
+  for (let i = parte.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    const t = parte[i]; parte[i] = parte[j]; parte[j] = t;
+  }
+
+  return parte.join('');
+}
+
 /** Direccion con esquema. Un dominio publico lleva HTTPS; un nombre de red no. */
 function normalizarDireccion(valor) {
   const t = String(valor || '').trim().replace(/\/+$/, '');
@@ -1117,8 +1152,26 @@ async function principal() {
   for (let intento = 0; intento < 3; intento++) {
     claveSql = await lector.preguntarOculto(
       '  Contrasena para SQL Server (usuario sa, al menos 8 caracteres y tres de\n' +
-      '  estos cuatro tipos: mayuscula, minuscula, numero y simbolo): '
+      '  estos cuatro tipos: mayuscula, minuscula, numero y simbolo).\n' +
+      '  Deje vacio y se la genero yo, que es lo mas comodo: '
     );
+
+    /* Si no escribe nada, se le genera. Inventarse una clave que cumpla los cuatro
+       requisitos es molesto, y hacerlo mal es lo que deja el contenedor de la base
+       muerto en bucle. */
+    if (!String(claveSql || '').trim()) {
+      claveSql = nuevaClaveSql();
+      console.log('');
+      bien('contrasena generada (quedara en el .env): ' + C.blanco + claveSql + C.reset);
+      console.log('  ' + C.ambar + 'APUNTELA: sin ella no podra restaurar un respaldo de la base.' + C.reset);
+      const fallosGenerada = revisarClaveSql(claveSql);
+      if (fallosGenerada.length) {
+        falta('la clave generada no cumple la politica: ' + fallosGenerada.join(', '));
+        continue;
+      }
+      break;
+    }
+
     const fallos = revisarClaveSql(claveSql);
     if (!fallos.length) break;
     falta('esa contrasena no la acepta SQL Server: ' + fallos.join(', '));
@@ -1131,7 +1184,7 @@ async function principal() {
       return 1;
     }
   }
-  bien('contrasena de SQL Server aceptada (no se muestra, queda en el .env)');
+  bien('contrasena de SQL Server aceptada (queda en el .env)');
 
   /* 6. El padron. */
   titulo('5. La base de cedulas');

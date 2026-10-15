@@ -18,6 +18,7 @@ const acceso = require('./acceso');
 const auditoria = require('./auditoria');
 const permisos = require('./permisos');
 const mantenimiento = require('./mantenimiento');
+const arranque = require('./arranque');
 const padron = require('./identidad/padron');
 const visitas = require('./visitas');
 const gafete = require('./gafete');
@@ -413,6 +414,22 @@ function rutas(ctx) {
 
       if (!resultado.ok) throw error(resultado.sinServidor || resultado.sinConexion ? 503 : 400, resultado.motivo);
 
+      /* Y se deja la institucion LISTA en el momento.
+       *
+       * Esto es lo que evita el paso que antes habia que recordar: activar solo
+       * guardaba la licencia, y los catalogos y el administrador se creaban al
+       * ARRANCAR. O sea que despues de activar habia que reiniciar el contenedor
+       * para poder entrar, aunque la pantalla dijera que ya estaba listo. Quien
+       * activaba se quedaba mirando una pantalla que le decia que entrara, y no
+       * tenia ningun usuario con el que entrar.
+       *
+       * Ahora se llama aqui, con la misma funcion que usa el arranque. Es
+       * idempotente, asi que llamarla dos veces no duplica nada. */
+      let preparacion = null;
+      if (primerArranque) {
+        preparacion = await arranque.prepararInstitucion();
+      }
+
       responder(res, {
         licencia: gestor.estado(),
         cliente: resultado.cliente || null,
@@ -420,6 +437,18 @@ function rutas(ctx) {
         // Si es el primer arranque, el sistema acaba de crear su institucion,
         // sus catalogos y su administrador. Conviene decirlo.
         primer_arranque: primerArranque,
+        // Y se devuelve el usuario del administrador, para que se pueda entrar sin
+        // tener que ir a buscar el archivo de credenciales al servidor.
+        administrador: preparacion && preparacion.ok && preparacion.admin
+          ? {
+              correo: preparacion.admin.correo,
+              clave: preparacion.admin.clave,
+              // Si el archivo no se pudo escribir, la clave solo se ve aqui: por eso
+              // se devuelve siempre, y el cliente decide si mostrarla.
+              archivo_escrito: Boolean(preparacion.admin.escrito),
+            }
+          : null,
+        preparada: Boolean(preparacion && preparacion.ok),
       });
     })
   );

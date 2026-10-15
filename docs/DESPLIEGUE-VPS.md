@@ -356,23 +356,31 @@ activación: escribe el ID y pulsa **Activar con el ID**. Si el cliente no tiene
 a Internet, se activa con el archivo `.vflow` (botón **↓** de su fila en el panel): se
 pega su contenido, o se sube el archivo, en la misma pantalla.
 
-### Paso 8.4 — Reiniciar la aplicación (no te lo salte)
+### Paso 8.4 — El sistema queda listo solo, sin reiniciar
+
+No hay que hacer nada más: al activar, el sistema crea su institución, sus catálogos y su
+administrador en el momento, y **la propia pantalla de activación te dice el usuario y la
+contraseña** para entrar.
+
+> Antes había que reiniciar el contenedor aquí, porque la activación solo guardaba la
+> licencia y todo lo demás se creaba al arrancar. Quien activaba se quedaba mirando una
+> pantalla que le decía que entrara, sin ningún usuario con el que entrar. Ya no: la
+> activación y el arranque usan la misma función.
+
+Para verlo en los registros:
 
 ```bash
-docker restart visitaflow-app
+docker logs --tail 20 visitaflow-app
 ```
-
-La pantalla dice que ya puede entrar, pero **la institución, sus catálogos y el
-administrador se crean al arrancar**. Hasta que no reinicies verás otra vez el
-formulario de activación o un acceso sin ningún usuario con el que entrar. Después del
-reinicio, en los registros aparece:
 
 ```
 [visitaflow] Institución "junta-los-prados" preparada (N registros iniciales).
-[visitaflow] Base de datos conectada: bd-sistema/VisitaFlow
 ```
 
-### Paso 8.5 — Leer la clave del administrador y entrar
+### Paso 8.5 — La clave del administrador, si hace falta
+
+La pantalla de activación ya te la muestra, y además queda en un archivo dentro del
+volumen:
 
 ```bash
 docker exec -it visitaflow-app cat /app/datos/CLAVE-ADMINISTRADOR.txt
@@ -479,17 +487,19 @@ docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -
   -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM PadronLigero.dbo.PADRON"
 ```
 
-### Paso 9.5 — Crear la vista y reiniciar la aplicación
+### Paso 9.5 — Reiniciar la aplicación (la vista ya viene en el respaldo)
 
 ```bash
-docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js
 docker restart visitaflow-app
 ```
 
-> **Sin la vista `dbo.CIUDADANOS`, buscar una cédula tarda 2,4 segundos en vez de 10
-> milisegundos.** Es lo que hace que SQL Server pueda usar el índice en vez de recorrer
-> los 7,8 millones de registros. El reinicio es para que la aplicación vuelva a probar
-> la conexión con el padrón y lo informe en `/api/salud`.
+> **La vista `dbo.CIUDADANOS` no hay que crearla**: viaja dentro del respaldo del padrón y
+> ya está en la copia restaurada. Se comprobó restaurando el `.bak` en una base aparte y
+> consultando la vista. El comando `node sql/03-vista-ciudadanos.js` es idempotente y no
+> molesta si lo ejecutas, pero no es lo que hace que la búsqueda sea rápida.
+
+El reinicio es solo para que la aplicación vuelva a probar la conexión con el padrón y lo
+informe en `/api/salud`.
 
 Al terminar puedes borrar el archivo del directorio personal del VPS
 (`rm /root/PadronLigero.bak`). El que está dentro del volumen puedes dejarlo: es tu copia

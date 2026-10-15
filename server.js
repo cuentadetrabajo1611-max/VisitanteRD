@@ -23,6 +23,7 @@ const util = require('./src/util');
 const gestor = require('./src/licencias/gestor');
 const { rutas } = require('./src/rutas');
 const mantenimiento = require('./src/mantenimiento');
+const arranque = require('./src/arranque');
 
 const app = express();
 
@@ -169,103 +170,12 @@ app.use((err, req, res, next) => {
 /* ------------------------------------------------------------------ */
 
 async function prepararBase() {
-  // El usuario de la licencia es la fuente de la verdad del tenant. Al guardar
-  // la licencia se crea o actualiza su institucion.
-  const estado = await gestor.cargar();
-
-  if (!estado.contenido) {
-    console.warn('[visitaflow] Arrancando SIN licencia válida: ' + estado.motivo);
-    console.warn('[visitaflow] El sistema queda en modo de solo lectura hasta que active una licencia.');
-    return;
-  }
-
-  // Si la base no existe, aqui se va a fallar. No es motivo para tumbar el
-  // servidor: se avisa y se sigue, para poder crearla con el contenedor arriba.
-  let t;
-  try {
-    t = await mantenimiento.porCodigo(estado.contenido.tenant);
-  } catch (e) {
-    console.error('[visitaflow] No se pudo preparar la institución: la base del sistema no responde.');
-    console.error('[visitaflow] Créela con: node sql/01-crear.js');
-    return;
-  }
-
-  if (!t) {
-    console.warn('[visitaflow] La licencia es de "' + estado.contenido.tenant + '" pero la institución no se pudo crear.');
-    return;
-  }
-
-  // Primer arranque: se deja la institucion usable sin tocar SQL a mano.
-  const resumen = await mantenimiento.prepararTenant(t.id, { sembrarCatalogos: true });
-  const creados = resumen.permisos + resumen.ajustes + resumen.departamentos + resumen.motivos + resumen.categorias + resumen.sedes + resumen.plantilla;
-  if (creados > 0) {
-    console.log('[visitaflow] Institución "' + t.codigo + '" preparada (' + creados + ' registros iniciales).');
-  }
-
-  // Un administrador con clave por defecto es un agujero. Se avisa fuerte y se
-  // deja la clave en un archivo local para que la cambien.
-  const admins = await bd.consultar(
-    "SELECT COUNT(*) AS n FROM vf_usuarios WHERE tenant_id = @tenant_id AND rol = 'admin' AND activo = 1",
-    { tenant_id: t.id }
-  );
-  if (!admins.recordset[0].n) {
-    const clave = generarClaveInicial();
-    const admin = await mantenimiento.crearAdmin(t.id, {
-      correo: process.env.ADMIN_CORREO || 'admin@' + t.codigo + '.local',
-      clave,
-      nombre: 'Administrador',
-    });
-    /* Las credenciales se dejan DENTRO de la carpeta de datos, que en el VPS es
-       un volumen. Si se escribieran en la raiz del proyecto, un redespliegue se
-       las llevaria y habria que restablecer la contrasena a mano. */
-    const ruta = path.join(config.archivos.datos, 'CLAVE-ADMINISTRADOR.txt');
-    try {
-      fs.mkdirSync(config.archivos.datos, { recursive: true });
-      fs.writeFileSync(
-        ruta,
-        'VisitaFlow - credenciales iniciales de la institución "' + t.codigo + '"\n' +
-          '=========================================================\n\n' +
-          '  Dirección  : ' + (config.servidor.urlPublica || 'http://localhost:' + config.servidor.puerto) + '\n' +
-          '  Institución: ' + t.codigo + '\n' +
-          '  Usuario    : ' + (process.env.ADMIN_CORREO || 'admin@' + t.codigo + '.local') + '\n' +
-          '  Contraseña : ' + clave + '\n\n' +
-          'CAMBie esta contraseña al entrar (Usuarios → restablecer) y BORRE este archivo.\n',
-        { mode: 0o600 }
-      );
-      const relativa = path.relative(config.raiz, ruta) || ruta;
-      // El recuadro se arma con la ruta ya recortada, para que los bordes
-      // queden alineados aunque el nombre de la institucion sea largo.
-      const aviso = 'La contraseña quedó en: ' + relativa;
-      console.log('');
-      console.log('  ┌──────────────────────────────────────────────────────────────┐');
-      console.log('  │  Se creó el administrador inicial de la institución.         │');
-      console.log('  │  Usuario: ' + (process.env.ADMIN_CORREO || 'admin@' + t.codigo + '.local').padEnd(51).slice(0, 51) + '│');
-      console.log('  │  ' + aviso.padEnd(60).slice(0, 60) + '│');
-      console.log('  │  Cámbiela y borre ese archivo.                             │');
-      console.log('  └──────────────────────────────────────────────────────────────┘');
-      console.log('');
-    } catch (e) {
-      // Si no se puede escribir, la clave se muestra una sola vez y queda claro
-      // que hay que anotarla: es mejor que dejarla en un archivo que no existe.
-      console.warn('');
-      console.warn('  Se creó el administrador inicial de la institución "' + t.codigo + '".');
-      console.warn('  Usuario   : ' + (process.env.ADMIN_CORREO || 'admin@' + t.codigo + '.local'));
-      console.warn('  Contraseña: ' + clave);
-      console.warn('  (no se pudo escribir el archivo de credenciales: ' + e.message + ')');
-      console.warn('  ANOTE la contraseña ahora: no se vuelve a mostrar.');
-      console.warn('');
-    }
-  }
-}
-
-/** Clave inicial legible pero no adivinable. */
-function generarClaveInicial() {
-  const crypto = require('crypto');
-  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  const bytes = crypto.randomBytes(14);
-  let clave = '';
-  for (let i = 0; i < 14; i++) clave += alfabeto[bytes[i] % alfabeto.length];
-  return clave + '!7';
+  /* Toda la logica vive en src/arranque.js para que la use tambien la ruta de
+     activacion. Antes estaba aqui, y eso obligaba a reiniciar el contenedor
+     despues de activar con el ID: los catalogos y el administrador se creaban al
+     arrancar, no al activar. */
+  const resultado = await arranque.prepararInstitucion();
+  arranque.anunciar(resultado);
 }
 
 /**

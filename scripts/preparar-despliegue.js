@@ -114,12 +114,51 @@ if (!fs.existsSync(privada) || !fs.existsSync(publica)) {
 /* 4. Secretos nuevos, para no reusar los de desarrollo. */
 titulo('4. Secretos que hay que inventar');
 
-/** 36 bytes al azar en base64, sin los caracteres que rompen un .env. */
+/**
+ * Una clave de SQL Server que COMPLECE la politica de complejidad.
+ *
+ * La version anterior tomaba 36 bytes al azar en base64 y les quitaba los
+ * caracteres + / = para que no rompieran el archivo .env. El efecto era que
+ * NUNCA quedaba ningun simbolo: de 2000 claves generadas, 2000 salieron sin
+ * simbolo. Y SQL Server exige un simbolo entre sus requisitos: la rechaza, el
+ * contenedor de la base arranca y se muere en bucle, y el sintoma que se ve es
+ * que la aplicacion no conecta, que apunta a otro sitio.
+ *
+ * Ahora se arma por partes: se garantiza que haya mayuscula, minuscula, numero y
+ * simbolo, y solo despues se rellena el resto al azar. Los simbolos son los que no
+ * rompen nada: ni comillas (romperian el .env y la linea de comandos), ni la barra
+ * invertida ni el dolar (los interpreta el shell al pasarlos a un comando docker).
+ */
+function nuevaClaveSql() {
+  const MAYUS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const MINUS = 'abcdefghijkmnopqrstuvwxyz';
+  const NUMS = '23456789';
+  const SIMB = '!@#%^*-_=+';
+
+  const todos = MAYUS + MINUS + NUMS + SIMB;
+  const elegir = (juego) => juego[crypto.randomInt(juego.length)];
+
+  const parte = [
+    elegir(MAYUS), elegir(MINUS), elegir(NUMS), elegir(SIMB),
+    elegir(MAYUS), elegir(MINUS), elegir(NUMS), elegir(SIMB),
+  ];
+  while (parte.length < 32) parte.push(elegir(todos));
+
+  // Se mezcla, para que los cuatro primeros no sean siempre del mismo tipo.
+  for (let i = parte.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    const t = parte[i]; parte[i] = parte[j]; parte[j] = t;
+  }
+
+  return parte.join('');
+}
+
+/** Un secreto largo y al azar, para JWT_SECRET y ADMIN_TOKEN. */
 function nuevoSecreto() {
   return crypto.randomBytes(36).toString('base64').replace(/[+/=]/g, '');
 }
 
-const claveSql = nuevoSecreto();
+const claveSql = nuevaClaveSql();
 const jwt = nuevoSecreto();
 const adminToken = nuevoSecreto();
 bien('secretos generados (cópielos de aquí abajo)');
