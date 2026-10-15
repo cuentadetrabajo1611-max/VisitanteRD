@@ -947,6 +947,20 @@ function comprobarLlaves() {
     const id = lic.keyId();
     lic.llavePrivada();
     console.log('[licencias] llave privada disponible, key_id ' + id);
+
+    /* Se avisa si falta el token de instalacion, porque sin el las rutas de
+       renovacion y de aviso responden 401 y el sintoma que se ve desde fuera es que
+       "la licencia no se renueva", que apunta a otro sitio. */
+    if (!tokenActivacion()) {
+      console.warn('');
+      console.warn('  AVISO: falta LICENCIA_TOKEN_ACTIVACION.');
+      console.warn('  Sin ese token, las instalaciones de sus clientes NO podran renovar su');
+      console.warn('  licencia ni avisar que se activaron: recibiran un 401. La activacion por');
+      console.warn('  ID sigue funcionando. El mismo valor va aqui y en cada instalacion.');
+      console.warn('');
+    } else {
+      console.log('[licencias] token de instalación configurado (' + tokenActivacion().length + ' caracteres)');
+    }
     return true;
   } catch (e) {
     console.error('');
