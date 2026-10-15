@@ -48,7 +48,8 @@
     "texto:reparar": "node scripts/reparar-texto.js --aplicar",
     "verificar": "npm run texto:revisar && npm run despliegue:revisar && npm run despliegue:simular",
     "demo:personas": "node scripts/demo-personas.js",
-    "test:panel": "node scripts/probar-panel-licencias.js"
+    "test:panel": "node scripts/probar-panel-licencias.js",
+    "desplegar:preparar": "node scripts/preparar-despliegue.js"
   },
   "keywords": [
     "visitantes",

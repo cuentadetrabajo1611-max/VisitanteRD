@@ -164,8 +164,26 @@ services:
       JWT_EXPIRA: 12h
 
       # Licencia: cada institucion apunta a su servidor de licencias.
+      # Licencia.
+      #
+      # OJO CON ESTA DIRECCIÓN, que es la que más se equivoca al desplegar.
+      #
+      # El servidor de licencias de ESTE despliegue es el del vendedor: es el que
+      # atiende a TODOS los clientes. Las instalaciones de los clientes están en
+      # SUS servidores, no en esta red, así que "http://licencias:4100" (el
+      # nombre interno del contenedor) NO les sirve: tienen que llegar por una
+      # dirección pública.
+      #
+      # Por eso se configura con una variable. Para probar en este mismo servidor
+      # vale la dirección interna; cuando haya clientes de verdad, se pone la
+      # pública con HTTPS:
+      #
+      #   LICENCIA_SERVIDOR_URL=https://licencias.su-dominio.com
+      #
+      # Y esa misma dirección es la que se configura en la instalación de cada
+      # cliente, para que pueda activar con su ID.
+      LICENCIA_SERVIDOR: ${LICENCIA_SERVIDOR_URL:-http://licencias:4100}
       LICENCIA_ARCHIVO: /app/datos/licencia.vflow
-      LICENCIA_SERVIDOR: http://licencias:4100
       LICENCIA_LLAVE_PUBLICA_B64: ${LICENCIA_LLAVE_PUBLICA_B64}
       LICENCIA_DIAS_AVISO: '30'
 

@@ -108,6 +108,14 @@ function rutas(ctx) {
           hasta: estadoLic.licencia ? estadoLic.licencia.hasta : null,
           dias_restantes: estadoLic.dias_restantes,
         },
+        /* El servidor de licencias, sin llamarlo: se informa de si está
+           configurado y a qué dirección apunta. Llamarlo en cada consulta de
+           salud convertiría una comprobación local en una que depende de la red,
+           y esta ruta la usa el healthcheck del contenedor. */
+        servidor_licencias: {
+          configurado: Boolean(config.licencia.servidor),
+          direccion: config.licencia.servidor || null,
+        },
       });
     })
   );

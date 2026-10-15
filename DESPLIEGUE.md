@@ -1,10 +1,33 @@
 # Desplegar VisitaFlow en el VPS con Dokploy
 
-Guía paso a paso, desde cero hasta el sistema funcionando con HTTPS.
+Guía paso a paso, desde cero hasta el sistema funcionando con HTTPS y el panel de
+licencias atendiendo a tus clientes.
 
-Dokploy levanta el `docker-compose.yml` del proyecto tal cual, así que no hay
-nada especial que configurar del lado del código: los tres servicios (base de
-datos, servidor de licencias y aplicación) ya están definidos.
+---
+
+## Cómo funciona esto, en una frase
+
+Este despliegue es **tu servidor**: levanta el sistema de visitantes y, sobre
+todo, levanta **el servidor de licencias que atiende a todos tus clientes**. Cada
+cliente instala su propia copia en su servidor y la activa con un ID que le das
+tú.
+
+```
+   TU VPS (este despliegue)                    EL SERVIDOR DE CADA CLIENTE
+   ┌─────────────────────────────┐             ┌──────────────────────────┐
+   │  bd-sistema (SQL Server)    │             │  Su propia copia de      │
+   │  app        → tu dominio    │             │  VisitaFlow, con su base │
+   │  licencias  → su dominio    │◄────────────┤  y su base de cédulas    │
+   │    · clientes               │  activa con │                          │
+   │    · módulos                │  su ID      │                          │
+   │    · activar / suspender    │             │                          │
+   └─────────────────────────────┘             └──────────────────────────┘
+```
+
+**El servidor de licencias necesita dominio público.** Los clientes están en sus
+propias redes, así que no llegan a una dirección interna de Docker: necesitan una
+dirección de Internet con HTTPS. Eso es lo que se configura en
+`LICENCIA_SERVIDOR_URL`.
 
 ---
 
@@ -13,72 +36,28 @@ datos, servidor de licencias y aplicación) ya están definidos.
 | Cosa | Detalle |
 |---|---|
 | Un VPS | Con Dokploy instalado y Docker funcionando |
-| Un dominio o subdominio | Por ejemplo `visitas.su-dominio.com`, apuntando a la IP del VPS |
-| El repositorio | VisitaFlow subido a GitHub, GitLab o el Git propio de Dokploy |
-| El par de llaves | Generadas con `npm run keys:gen` en su máquina |
-| La base de cédulas | `PadronLigero.bak`, unos 800 MB (se sube una sola vez) |
+| Dos dominios | Uno para el sistema, otro para el servidor de licencias |
+| El repositorio | VisitaFlow en un repositorio Git (Dokploy despliega desde ahí) |
+| El par de llaves | Generadas con `npm run keys:gen` en tu máquina |
+| La base de cédulas | `PadronLigero.bak`, 274 MB (se sube una sola vez) |
 
-### Sobre los recursos
+### El primer paso, siempre
 
-SQL Server es lo que más consume, y aquí hay un dato que conviene saber: **SQL
-Server Express tiene un tope duro de 1.410 MB de memoria de buffer**, use la que
-use el contenedor. Darle 8 GB no sirve de nada.
-
-Por eso el compose ya viene ajustado así:
-
-```yaml
-bd-sistema:
-  environment:
-    MSSQL_MEMORY_LIMIT_MB: '1400'   # el motor no puede pasar de aquí
-  deploy:
-    resources:
-      limits:
-        memory: 2g                  # margen para el sistema y las herramientas
+```powershell
+npm run desplegar:preparar
 ```
 
-**Con esto el despliegue entra cómodo en un VPS de 4 GB.** El sistema completo
-—base de datos, servidor de licencias y aplicación— no debería pasar de 1,5 GB
-en uso normal.
-
-Si el VPS tiene **menos de 3 GB**, asegúrese de que hay archivo de intercambio
-(swap). SQL Server se cae solo si no encuentra memoria, y en el registro no dice
-nada útil.
-
-### Si la base de datos no arranca
-
-El fallo más común de este despliegue no tiene nada que ver con VisitaFlow: el
-contenedor de SQL Server corre con el usuario **10001** (`mssql`), no como root.
-Si el volumen queda a nombre de root, la base no arranca y el registro dice:
-
-```
-Directory /var/opt/mssql/data is not writable
-```
-
-Con volúmenes **con nombre** (los que usa este compose) no pasa nada: Docker
-copia los permisos de la imagen. Solo pasa si cambia el volumen por una carpeta
-del host, y en ese caso:
-
-```bash
-mkdir -p ./datos-sql && sudo chown -R 10001:0 ./datos-sql
-```
-
-### Sobre el disco
-
-Cuente con unos 3 GB para la base del sistema, la de cédulas y los respaldos.
-La base de cédulas ocupa 1.536 MB en disco, de los cuales 427 MB son datos
-reales.
-
-SQL Server Express tiene un tope de **10 GB por base de datos**. La base del
-sistema (visitas, usuarios, bitácora) no llega ni de lejos. La de cédulas son
-unos 800 MB. Hay margen de sobra.
+Comprueba que esté todo, **genera los secretos y las llaves en base64**, y te dice
+exactamente qué pegar en Dokploy. Si algo falta, lo dice ahí y no a medio
+despliegue.
 
 ---
 
 ## Paso 1 — Generar las llaves del licenciamiento
 
-Esto se hace **en su máquina**, una sola vez. Estas llaves son la identidad del
-licenciamiento: con la privada se firman las licencias, con la pública cada
-instalación las verifica.
+En tu máquina, una sola vez. Estas llaves son la identidad del licenciamiento:
+con la privada se firman las licencias, con la pública cada instalación las
+verifica.
 
 ```powershell
 cd visitaflow
@@ -91,175 +70,159 @@ Se crean en `licencias-keys/`: `privada.pem`, `publica.pem` y `keyid.txt`.
 > `.dockerignore` ya la excluyen. Si se filtra, cualquiera puede emitir licencias
 > válidas.
 
-Conviértalas a base64 para pegarlas en Dokploy:
+`npm run desplegar:preparar` te las da ya convertidas a base64.
+
+---
+
+## Paso 2 — Subir el código a un repositorio
+
+Dokploy despliega desde un repositorio Git. El proyecto ya está preparado como
+repositorio local con sus commits hechos; solo falta subirlo:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("licencias-keys\privada.pem"))
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("licencias-keys\publica.pem"))
+cd visitaflow
+git remote add origin https://github.com/tu-usuario/visitaflow.git
+git push -u origin main
 ```
 
-Guarde los dos valores: se usan en el paso 3.
+Crea el repositorio **vacío** en GitHub o GitLab (sin README ni .gitignore, para
+que no choque). Cualquier Git sirve.
+
+> **Revísalo antes de subir.** Esto no debe devolver nada:
+> ```powershell
+> git ls-files | Select-String "\.env|licencias-keys|\.pem"
+> ```
 
 ---
 
-## Paso 2 — Crear la aplicación en Dokploy
+## Paso 3 — Crear la aplicación en Dokploy
 
-1. Entre a Dokploy y vaya a **Projects** → cree un proyecto (por ejemplo
-   `visitaflow`).
-2. Dentro, **Create Service** → **Docker Compose**.
-3. Conecte el repositorio de VisitaFlow y elija la rama.
-4. En **Compose Path**, deje `docker-compose.yml` (está en la raíz del
-   proyecto).
+1. **Projects** → crea un proyecto (`visitaflow`).
+2. **Create Service** → **Docker Compose**.
+3. Conecta el repositorio y elige la rama.
+4. **Compose Path**: `docker-compose.yml` (está en la raíz).
 
-Aún no despliegue: primero hay que poner las variables.
+Aún no despliegues: primero las variables.
 
 ---
 
-## Paso 3 — Poner las variables de entorno
+## Paso 4 — Las variables de entorno
 
-En la pestaña **Environment** de la aplicación, pegue esto con sus valores:
+En la pestaña **Environment**, pega lo que te dio
+`npm run desplegar:preparar`:
 
 ```env
-# --- Base de datos ---------------------------------------------------------
-CLAVE_SQL=una-clave-larga-y-sin-comillas-ni-cifrillas
+CLAVE_SQL=<la que generó>
+JWT_SECRET=<la que generó>
+ADMIN_TOKEN=<la que generó>
 
-# --- Sesiones y administración ---------------------------------------------
-JWT_SECRET=otro-secreto-largo-distinto-del-anterior
-ADMIN_TOKEN=un-token-largo-para-la-consola-de-licencias
+URL_PUBLICA=https://visitas.tu-dominio.com
+LICENCIA_SERVIDOR_URL=https://licencias.tu-dominio.com
 
-# --- Dirección pública -----------------------------------------------------
-URL_PUBLICA=https://visitas.su-dominio.com
-
-# --- Llaves del licenciamiento (en base64, del paso 1) ---------------------
 LICENCIA_LLAVE_PRIVADA_B64=<la privada en base64>
 LICENCIA_LLAVE_PUBLICA_B64=<la pública en base64>
 ```
 
-**Ninguna es opcional.** El `docker-compose.yml` usa `${VARIABLE:?mensaje}` en
-las que no tienen valor por defecto, así que si falta alguna el despliegue se
-detiene y dice cuál. Es a propósito: es mejor que falle al desplegar a que
-arranque con un secreto vacío.
+**Ninguna es opcional.** El `docker-compose.yml` usa `${VARIABLE:?mensaje}`, así
+que si falta alguna el despliegue se detiene y dice cuál. Es a propósito: mejor
+que falle al desplegar a que arranque con un secreto vacío.
 
-### Cómo generar los secretos
+### Aviso sobre la contraseña de SQL Server
 
-```powershell
-# En PowerShell
-[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
-```
-
-Repítalo tres veces, una por cada secreto. **No use la misma cadena dos veces.**
-
-### Aviso sobre las contraseñas de SQL Server
-
-La contraseña de `sa` tiene que cumplir la política de SQL Server: **8
-caracteres como mínimo, con mayúscula, minúscula y un símbolo**. Si no, el
-contenedor de la base arranca y se muere en bucle sin decir por qué. Evite
-comillas simples y dobles: el compose las interpretaría.
+Tiene que cumplir la política de SQL Server: **8 caracteres como mínimo, con
+mayúscula, minúscula y un símbolo**. Si no, el contenedor de la base arranca y se
+muere en bucle sin decir por qué. Evita comillas simples y dobles.
 
 ---
 
-## Paso 4 — El dominio
+## Paso 5 — Los dominios
 
-En la pestaña **Domains** de la aplicación:
+En la pestaña **Domains**:
 
 | Servicio | Puerto interno | Dominio |
 |---|---|---|
-| `app` | `3000` | `visitas.su-dominio.com` |
-| `licencias` | `4100` | *(dejar sin dominio)* |
+| `app` | `3000` | `visitas.tu-dominio.com` |
+| `licencias` | `4100` | `licencias.tu-dominio.com` |
 
-Dokploy pone Traefik delante y saca el certificado HTTPS solo. No hay que tocar
-nginx ni configurar nada más.
+**Los dos llevan dominio**, y esto es importante: el servidor de licencias ya no
+es solo para ti. **Tus clientes tienen que poder alcanzarlo** para activar su
+instalación. Sin dominio público, la activación por ID no funciona y habría que
+mandar archivos a mano.
 
-> **No publique el servidor de licencias.** Solo lo usa usted desde su máquina
-> para emitir licencias, y ya está en la red interna de Compose. Si lo deja
-> abierto, cualquiera puede intentar emitir licencias. Adminístrelo por túnel
-> SSH cuando lo necesite.
+Dokploy pone Traefik delante y saca el certificado HTTPS solo.
 
----
-
-## Paso 5 — Desplegar
-
-Dele a **Deploy** y siga los registros. Lo que debería ver:
-
-1. Se descarga la imagen de SQL Server y arranca. **Tarda un minuto o dos** en
-   aceptar conexiones.
-2. El servidor de licencias arranca.
-3. La aplicación arranca. Como la base todavía no existe, dice:
-
-```
-[visitaflow] No se pudo conectar a SQL Server: ...
-[visitaflow] El servidor arranca igual para poder repararlo.
-[visitaflow] Cree la base con:  docker exec -it visitaflow-app node sql/01-crear.js
-```
-
-**Esto es correcto y esperado.** El sistema arranca aunque falte la base, a
-propósito: así se puede crear desde dentro del contenedor.
+> El servidor de licencias está protegido por `ADMIN_TOKEN`: sin ese token no se
+> puede ver ni tocar nada. Lo único abierto es la activación por ID, que solo
+> devuelve la licencia del cliente que ya tiene ese ID.
 
 ---
 
-## Paso 6 — Crear la base del sistema
+## Paso 6 — Desplegar
 
-Desde el VPS, por SSH:
+Dale a **Deploy**. Lo que deberías ver:
+
+1. Se descarga la imagen de SQL Server y arranca. **Tarda un minuto o dos.**
+2. El servidor de licencias arranca y dice su `key_id`.
+3. La aplicación arranca. Como la base todavía no existe, dice que hay que
+   crearla. **Esto es correcto y esperado.**
+
+Lo importante está en los registros de la aplicación:
+
+```
+[visitaflow] Servidor de licencias OK: https://licencias.tu-dominio.com (llave 08e382e3...)
+```
+
+Si en vez de eso dice que no responde, **la activación por ID no va a funcionar**,
+y ahí está el aviso con la dirección que intentó. Las causas típicas: el dominio
+del servidor de licencias no está configurado, o le falta el HTTPS.
+
+---
+
+## Paso 7 — Crear la base del sistema
 
 ```bash
 docker exec -it visitaflow-app node sql/01-crear.js
 ```
 
-Crea las 20 tablas, los permisos y el catálogo de módulos. Es idempotente: se
-puede repetir sin romper nada.
+Crea las 22 tablas, los permisos y los catálogos. Es idempotente.
 
 ---
 
-## Paso 7 — Subir la base de cédulas
+## Paso 8 — Subir la base de cédulas
 
-Esto es lo único pesado del despliegue, y se hace **una sola vez**.
+Lo único pesado, y se hace **una sola vez**.
 
 ### Cuánto pesa, medido
-
-Antes de empezar, conviene saber a qué se enfrenta. Los números reales de esta
-base, medidos con `npm run padron:medir`:
 
 | Concepto | Tamaño |
 |---|---|
 | Registros | 7.856.023 |
 | Datos de la tabla `PADRON` | **427 MB** (57 bytes por registro) |
-| Archivo en disco | 1.536 MB (el resto es espacio reservado sin usar) |
-| **Respaldo comprimido** | **274 MB** ← esto es lo que se sube |
+| Archivo en disco | 1.536 MB (el resto es espacio reservado) |
+| **Respaldo comprimido** | **274 MB** ← lo que se sube |
 
-Y el tiempo de subida, según su conexión:
+A 5 Mbps son 8 minutos. La base original, con fotos, son 86.508 MB y 40 horas de
+subida. Esa diferencia es toda la razón de que este sistema sea viable.
 
-| Velocidad de subida | Tiempo |
-|---|---|
-| 1 Mbps | 38 min |
-| 5 Mbps | 8 min |
-| 20 Mbps | 2 min |
-
-> **Compárelo con la alternativa.** La base original, con las fotos, son
-> **86.508 MB**: subirla a 5 Mbps tarda **40 horas**. La ligera son 8 minutos.
-> Esa es toda la razón de que exista este proyecto: solo nombres, apellidos y
-> fechas.
-
-### En su máquina
+### En tu máquina
 
 ```powershell
-sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q "BACKUP DATABASE PadronLigero TO DISK = 'C:\TempSQL\PadronLigero.bak' WITH COMPRESSION"
+sqlcmd -S localhost -U sa -P "TU_CLAVE" -C -Q "BACKUP DATABASE PadronLigero TO DISK = 'C:\TempSQL\PadronLigero.bak' WITH COMPRESSION"
 ```
-
-Tarda unos segundos. El archivo queda en 274 MB.
 
 ### Al VPS
 
 ```bash
-scp C:\TempSQL\PadronLigero.bak usuario@su-vps:/ruta/del/proyecto/respaldo-padron/
+scp C:\TempSQL\PadronLigero.bak usuario@206.183.130.121:/ruta/del/proyecto/respaldo-padron/
 ```
 
-Descomente la línea del volumen `./respaldo-padron` en el servicio `bd-sistema`
-del compose, y vuelva a desplegar.
+Descomenta la línea del volumen `./respaldo-padron` en el servicio `bd-sistema` y
+vuelve a desplegar.
 
 ### Dentro del contenedor
 
 ```bash
-docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q \
+docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "TU_CLAVE" -C -Q \
   "RESTORE DATABASE PadronLigero FROM DISK = '/respaldo/PadronLigero.bak' WITH MOVE 'PadronLigero' TO '/var/opt/mssql/data/PadronLigero.mdf', MOVE 'PadronLigero_log' TO '/var/opt/mssql/data/PadronLigero_log.ldf'"
 ```
 
@@ -269,92 +232,63 @@ Y después la vista que usa el sistema:
 docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js
 ```
 
-Tarda unos segundos. Crea `dbo.CIUDADANOS`, que es la vista con la collation
-correcta para que las búsquedas por cédula usen el índice.
-
 > **Sin esta vista, buscar una cédula tarda 2,4 segundos en vez de 10
-> milisegundos.** La diferencia es que la vista fuerza la collation y SQL Server
-> puede usar el índice en vez de recorrer los 7,8 millones de registros.
-
-### Comprobar que quedó bien
-
-```bash
-docker exec -it visitaflow-app node -e "require('./src/db.js').conectarPadron().then(async bd => { const r = await bd.consultarPadron('SELECT COUNT_BIG(*) AS n FROM dbo.CIUDADANOS'); console.log(r.recordset[0].n + ' registros'); await bd.cerrar(); })"
-```
-
-Debe decir `7856023 registros`.
+> milisegundos.** La vista fuerza la intercalación y SQL Server puede usar el
+> índice en vez de recorrer los 7,8 millones de registros.
 
 ---
 
-## Paso 8 — Activar el sistema
+## Paso 9 — Emitir la primera licencia y activar
 
-Abra `https://visitas.su-dominio.com`. Como no hay licencia, el sistema muestra
-**directamente la pantalla de activación**.
+Entra a `https://licencias.tu-dominio.com` con tu `ADMIN_TOKEN` y pulsa
+**+ Nueva licencia**: código de la institución, nombre del cliente y días. El
+sistema te dará un **ID** con formato `LIC-XXXXXXXX`.
 
-1. Emita una licencia desde su máquina:
+Después abre `https://visitas.tu-dominio.com`. Como no hay licencia, muestra la
+**pantalla de activación**. Escribe el ID y listo: el sistema crea la institución,
+sus catálogos y el administrador.
 
-   ```bash
-   # Con el servidor de licencias a mano
-   npm run licencias
-   
-   # O directamente, que es más rápido
-   node scripts/licencia-demo.js junta-los-prados 365
-   ```
+```bash
+docker exec -it visitaflow-app cat /app/datos/CLAVE-ADMINISTRADOR.txt
+```
 
-   Se genera el archivo `.vflow`. **Ese archivo es la licencia**: entréguelo al
-   cliente.
+### Y para un cliente
 
-2. Pegue el contenido del `.vflow` en la pantalla de activación.
+Igual, pero en **su** servidor:
 
-3. El sistema verifica la firma, crea la institución, sus catálogos (departamentos,
-   motivos, categorías, sedes, plantilla de gafete) y **el administrador inicial**.
+1. Tú creas el cliente en tu panel y le das el **ID**.
+2. El cliente instala VisitaFlow en su servidor.
+3. En su pantalla de activación escribe el ID.
+4. Su sistema queda activado, con los módulos que tú le hayas puesto.
 
-4. Lea la clave del administrador:
-
-   ```bash
-   docker exec -it visitaflow-app cat /app/datos/CLAVE-ADMINISTRADOR.txt
-   ```
-
-5. Entre con esas credenciales y **cámbiela** en Usuarios.
-
-> La activación funciona sin sesión **solo** cuando la instalación está vacía. Es
-> necesario: sin licencia no hay institución, y sin institución no hay usuarios,
-> así que nadie podría activar el sistema. En cuanto existe una institución, la
-> activación vuelve a exigir sesión y permiso.
+Si el cliente no tiene salida a Internet, se activa con el archivo `.vflow`: en el
+panel, botón **↓** de su fila, y se lo mandas.
 
 ---
 
-## Paso 9 — Comprobar que quedó bien
+## El día a día: tu panel de licencias
 
-```bash
-# La aplicación responde
-curl -s https://visitas.su-dominio.com/api/salud | head -c 400
+En `https://licencias.tu-dominio.com` tienes todos tus clientes. Por cada fila:
 
-# Los tres contenedores están arriba
-docker compose ps
-```
+| Acción | Para qué |
+|---|---|
+| **Renovar** | Extiende la vigencia |
+| **⏸ Suspender** | Corta el servicio, con un motivo que el cliente verá |
+| **▶ Reactivar** | Lo devuelve al servicio |
+| **☰ Módulos** | Elige qué incluye su licencia (de 10 posibles) |
+| **🕘 Historial** | Todo lo que ha pasado con esa licencia |
+| **↓** | Descarga el archivo `.vflow` para entregárselo |
 
-Lo que debe decir `/api/salud`:
+**Suspender no borra nada.** El cliente conserva todo su historial de visitas y se
+reactiva cuando quieras. Su sistema sigue funcionando en solo lectura, y el motivo
+que escribas llega hasta su pantalla de licencia: dejar a alguien sin servicio sin
+decirle por qué es lo peor que se puede hacer.
 
-```json
-{
-  "ok": true,
-  "entorno": "production",
-  "base_datos": { "disponible": true },
-  "cedulas":    { "disponible": true },
-  "licencia":   { "valida": true, "estado": "activa" }
-}
-```
-
-Y desde su máquina, una comprobación de verdad:
-
-```powershell
-cd visitaflow
-$env:PRUEBA_URL="https://visitas.su-dominio.com"
-npm test
-```
-
-Son 69 pruebas de extremo a extremo contra el sistema en producción.
+**Los módulos se venden por partes.** El cambio llega en la siguiente consulta, sin
+reinstalar nada. Se pueden quitar los que se venden aparte (reportes, vigilancia,
+pre-registro, API). Los que sostienen la operación (registro, recepción, gafetes,
+configuración, usuarios) **no se bloquean nunca**: dejar a un recepcionista sin
+poder registrar con gente en la puerta es peor que una licencia impagada.
 
 ---
 
@@ -363,30 +297,21 @@ Son 69 pruebas de extremo a extremo contra el sistema en producción.
 El respaldo lo escribe **SQL Server**, no la aplicación:
 
 ```bash
-docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "SU_CLAVE" -C -Q \
+docker exec -it visitaflow-bd /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "TU_CLAVE" -C -Q \
   "BACKUP DATABASE VisitaFlow TO DISK = '/var/opt/mssql/backup/VisitaFlow.bak' WITH COMPRESSION"
-```
-
-Y sáquelo del servidor:
-
-```bash
 docker cp visitaflow-bd:/var/opt/mssql/backup/VisitaFlow.bak .
 ```
 
 > **Un volumen que solo vive en el VPS no es una copia de seguridad: es el mismo
-> disco.** Baje el `.bak` a su máquina, o a otro servidor.
+> disco.**
 
-La carpeta `/var/opt/mssql/backup` ya es parte del volumen de datos, así que el
-archivo sobrevive a un redespliegue.
+Y **apunta el archivo del registro de licencias** (volumen `datos-licencias`,
+`licencias-emitidas.json`): ahí están tus clientes. Si se pierde, los pierdes a
+todos.
 
 ---
 
-## Actualizar el sistema
-
-Cuando haya cambios en el código, dele a **Deploy** otra vez. Dokploy vuelve a
-construir la imagen y recrea los contenedores.
-
-**Qué sobrevive y qué no:**
+## Qué sobrevive a un redespliegue
 
 | Sobrevive (está en volúmenes) | Se pierde |
 |---|---|
@@ -395,10 +320,11 @@ construir la imagen y recrea los contenedores.
 | La licencia (`/app/datos/licencia.vflow`) | |
 | La clave del administrador (`/app/datos/CLAVE-ADMINISTRADOR.txt`) | |
 | Los logos subidos (`/app/datos/archivos`) | |
+| **El registro de licencias** (`datos-licencias`) | |
 
 Esto es así a propósito: la licencia y las credenciales viven **dentro** del
 volumen, no en la raíz del proyecto. Si vivieran fuera, cada redespliegue se las
-llevaría y habría que activar el sistema otra vez.
+llevaría.
 
 ---
 
@@ -406,22 +332,22 @@ llevaría y habría que activar el sistema otra vez.
 
 | Síntoma | Qué pasa | Solución |
 |---|---|---|
-| El despliegue se detiene: *"Defina CLAVE_SQL en el archivo .env"* | Falta esa variable | Póngala en **Environment** |
+| El despliegue se detiene: *"Defina CLAVE_SQL"* | Falta esa variable | Póngala en **Environment** |
 | `bd-sistema` arranca y se muere en bucle | La contraseña de `sa` no cumple la política | Mínimo 8 caracteres, mayúscula, minúscula y símbolo. Sin comillas |
+| *"Servidor de licencias ... no respondió"* | No se llega al servidor, o el dominio no está | Revisa `LICENCIA_SERVIDOR_URL` y el dominio del servicio `licencias` |
+| *"Las licencias de ese servidor NO se podrán verificar aquí"* | El servidor usa otras llaves | Vuelve a emitir con las llaves correctas |
 | La app dice que no hay base | Falta crearla | `docker exec -it visitaflow-app node sql/01-crear.js` |
-| `/api/salud` dice `cedulas: disponible: false` | Falta la base de cédulas o la vista | Pasos 7 y la línea de `03-vista-ciudadanos.js` |
+| `/api/salud` dice `cedulas: false` | Falta la base de cédulas o la vista | Paso 8 y `03-vista-ciudadanos.js` |
 | Buscar una cédula tarda segundos | Falta la vista `CIUDADANOS` | `docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js` |
-| *"La firma de la licencia NO es válida"* | El archivo se editó, o se emitió con otras llaves | Emita una nueva con las llaves correctas |
-| El servidor de licencias da 404 | Está detrás de Traefik sin dominio | Accédalo por túnel SSH al puerto 4100 |
-| Perdió la clave del administrador | — | `docker exec -it visitaflow-app node scripts/restablecer-admin.js junta-los-prados` |
-| El sistema quedó en solo lectura | La licencia venció | Emita una nueva y actívela. **El historial se sigue viendo y exportando** |
+| *"Esa licencia está suspendida"* al activar | La suspendiste desde el panel | Reactívala; el motivo se le muestra al cliente |
+| Perdiste la clave del administrador | — | `docker exec -it visitaflow-app node scripts/restablecer-admin.js <institucion>` |
+| Perdiste el `ADMIN_TOKEN` | Está en las variables de Dokploy | Cópialo de ahí |
 
 ---
 
 ## Lo que NO hay que hacer
 
-- **No** publique el servidor de licencias en Internet.
-- **No** suba `licencias-keys/privada.pem` al repositorio.
-- **No** use la misma cadena para `CLAVE_SQL`, `JWT_SECRET` y `ADMIN_TOKEN`.
-- **No** borre el volumen `datos-sql` para "empezar limpio": ahí está todo.
-- **No** confíe en que el VPS hace copias de seguridad. No las hace.
+- **No** subas `licencias-keys/privada.pem` al repositorio.
+- **No** uses la misma cadena para `CLAVE_SQL`, `JWT_SECRET` y `ADMIN_TOKEN`.
+- **No** borres los volúmenes `datos-sql` ni `datos-licencias`.
+- **No** confíes en que el VPS hace copias de seguridad. No las hace.

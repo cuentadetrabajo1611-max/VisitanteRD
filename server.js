@@ -268,6 +268,71 @@ function generarClaveInicial() {
   return clave + '!7';
 }
 
+/**
+ * Comprueba si el servidor de licencias responde, y lo dice con claridad.
+ *
+ * Los tres casos que hay que distinguir, porque cada uno se arregla de una forma
+ * distinta:
+ *
+ *   - No hay servidor configurado: el sistema se activa solo con el archivo
+ *     .vflow. No es un error.
+ *   - El servidor responde: todo listo para activar por ID.
+ *   - El servidor no responde: la dirección está mal, o el servidor no está
+ *     levantado, o no hay salida a Internet. Se dice la dirección que se intentó,
+ *     que es el dato que hace falta para arreglarlo.
+ */
+async function comprobarServidorDeLicencias() {
+  const url = config.licencia.servidor;
+  if (!url) {
+    console.log('[visitaflow] Servidor de licencias: no configurado (se activa con archivo .vflow).');
+    return { configurado: false };
+  }
+
+  const destino = url.replace(/\/+$/, '') + '/api/salud';
+  const control = new AbortController();
+  const reloj = setTimeout(() => control.abort(), 6000);
+
+  try {
+    const r = await fetch(destino, { signal: control.signal });
+    clearTimeout(reloj);
+
+    if (!r.ok) {
+      console.warn('[visitaflow] Servidor de licencias en ' + url + ' respondió ' + r.status + '.');
+      return { configurado: true, ok: false, estado: r.status };
+    }
+
+    const datos = await r.json().catch(() => ({}));
+    const keyId = datos.llave ? datos.llave.key_id : null;
+    console.log('[visitaflow] Servidor de licencias OK: ' + url + (keyId ? ' (llave ' + keyId + ')' : ''));
+
+    /* Si el servidor usa una llave distinta de la que espera esta instalación, la
+       activación va a fallar aunque todo lo demás esté bien: el servidor firmaría
+       con una llave cuya pública no está aquí. Mejor saberlo al arrancar que
+       cuando el cliente esté intentando activar. */
+    let mia = null;
+    try {
+      mia = require('./src/licencias/licencia').keyId();
+    } catch (e) {
+      mia = null;
+    }
+
+    if (keyId && mia && keyId !== mia) {
+      console.warn('[visitaflow] AVISO: el servidor de licencias usa la llave ' + keyId +
+        ' y esta instalación espera ' + mia + '.');
+      console.warn('[visitaflow] Las licencias de ese servidor NO se podrán verificar aquí.');
+      return { configurado: true, ok: true, llave_distinta: true, keyId, mia };
+    }
+
+    return { configurado: true, ok: true, keyId };
+  } catch (e) {
+    clearTimeout(reloj);
+    const motivo = e.name === 'AbortError' ? 'no respondió a tiempo' : e.message;
+    console.warn('[visitaflow] Servidor de licencias en ' + url + ': ' + motivo + '.');
+    console.warn('[visitaflow] La activación por ID no funcionará; se puede activar con el archivo .vflow.');
+    return { configurado: true, ok: false, motivo };
+  }
+}
+
 async function arrancar() {
   const avisos = config.revisar();
   for (const a of avisos) console.warn('[visitaflow] AVISO: ' + a);
@@ -319,6 +384,17 @@ async function arrancar() {
      al reemplazar la licencia, el sistema seguia con la anterior en memoria
      buena parte del dia. */
   gestor.vigilar(2);
+
+  /* Se comprueba si el servidor de licencias responde.
+   *
+   * Se hace al arrancar y no en cada consulta porque es lo que permite
+   * diagnosticar un despliegue en dos segundos: si el servidor no llega, la
+   * activación por ID no va a funcionar, y sin este aviso habría que descubrirlo
+   * probando a activar y viendo un error genérico.
+   *
+   * No bloquea el arranque ni impide nada: el sistema funciona sin Internet, y
+   * eso incluye no poder hablar con el servidor de licencias. */
+  comprobarServidorDeLicencias().catch(() => {});
 
   const servidor = http.createServer(app);
   servidor.listen(config.servidor.puerto, config.servidor.host, () => {
