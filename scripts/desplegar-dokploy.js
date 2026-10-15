@@ -59,14 +59,23 @@ function paso(t) { console.log(''); console.log('  ' + t); }
 /* Cliente de la API                                                   */
 /* ------------------------------------------------------------------ */
 
-async function api(ruta, cuerpo, metodo) {
-  const opciones = {
-    method: metodo || (cuerpo === undefined ? 'GET' : 'POST'),
+/**
+ * Llama a la API de Dokploy.
+ *
+ * SIEMPRE por POST con el cuerpo en JSON, incluidas las consultas.
+ *
+ * Esto no es capricho: tRPC (que es lo que usa Dokploy por dentro) atiende las
+ * consultas por GET, pero entonces los parámetros tienen que ir en un formato
+ * especial, y armar la URL a mano falla. Con POST, el nombre del procedimiento
+ * queda limpio en la ruta y los parámetros viajan en el cuerpo, que es lo que
+ * tRPC espera en ese caso. Se comprobó contra el código de Dokploy.
+ */
+async function api(ruta, cuerpo) {
+  const r = await fetch(DOKPLOY + '/api/' + ruta.replace(/^\/+/, ''), {
+    method: 'POST',
     headers: { 'x-api-key': TOKEN, 'Content-Type': 'application/json' },
-  };
-  if (cuerpo !== undefined) opciones.body = JSON.stringify(cuerpo);
-
-  const r = await fetch(DOKPLOY + '/api/' + ruta.replace(/^\/+/, ''), opciones);
+    body: JSON.stringify(cuerpo === undefined ? {} : cuerpo),
+  });
   const texto = await r.text();
 
   let datos;
@@ -95,6 +104,32 @@ function leerCompose() {
   return texto;
 }
 
+/**
+ * Los nombres de los servicios del compose.
+ *
+ * Solo los de PRIMER nivel dentro de `services:`: los que tienen exactamente dos
+ * espacios de sangria y no van precedidos de "-". Contar con una expresion
+ * regular suelta daba de mas, porque claves como `build:`, `environment:` o
+ * `volumes:` tambien tienen esa forma.
+ */
+function serviciosDelCompose(texto) {
+  const lineas = (texto || leerCompose()).split('\n');
+  const salida = [];
+  let dentro = false;
+
+  for (const linea of lineas) {
+    if (/^services:\s*$/.test(linea)) { dentro = true; continue; }
+    // Otra seccion de primer nivel cierra la lista.
+    if (dentro && /^[a-zA-Z]/.test(linea)) break;
+    if (!dentro) continue;
+
+    const m = /^ {2}([a-zA-Z0-9._-]+):\s*$/.exec(linea);
+    if (m) salida.push(m[1]);
+  }
+
+  return salida;
+}
+
 /* ------------------------------------------------------------------ */
 /* Comprobaciones antes de tocar nada                                  */
 /* ------------------------------------------------------------------ */
@@ -118,49 +153,56 @@ async function comprobar() {
 
   paso('2. El token de API');
 
+  /* Si falta el token, no se corta aquí: se sigue comprobando el resto para que
+     de una sola pasada se vea TODO lo que hay que arreglar. Descubrir los
+     problemas de uno en uno, ejecutando el script cinco veces, es una pérdida de
+     tiempo para quien lo usa. */
   if (!TOKEN) {
     mal('Falta DOKPLOY_TOKEN.');
     info('Genérelo en el panel:  Settings -> Profile -> API/CLI -> Generate token');
-    info('Y pásemelo, o ejecute:  $env:DOKPLOY_TOKEN = "el-token"');
-    return false;
-  }
-
-  try {
-    await api('project.all');
-    bien('el token funciona (se pudo listar los proyectos)');
-  } catch (e) {
-    if (e.estado === 401) {
-      mal('El token no es válido (401). Genere uno nuevo en Settings -> Profile -> API/CLI.');
-    } else {
-      mal(e.message);
+    info('Y ejecute:  $env:DOKPLOY_TOKEN = "el-token"');
+  } else {
+    try {
+      await api('project.all');
+      bien('el token funciona (se pudo listar los proyectos)');
+    } catch (e) {
+      if (e.estado === 401) {
+        mal('El token no es válido (401). Genere uno nuevo en Settings -> Profile -> API/CLI.');
+      } else {
+        mal(e.message);
+      }
     }
-    return false;
   }
 
   paso('3. El compose del proyecto');
 
   try {
     const compose = leerCompose();
-    const tieneServicios = /^services:/m.test(compose);
-    if (!tieneServicios) {
+    if (!/^services:/m.test(compose)) {
       mal('el docker-compose.yml no tiene la sección "services"');
-      return false;
+    } else {
+      const servicios = serviciosDelCompose(compose);
+      bien('el compose tiene ' + servicios.length + ' servicio(s): ' + servicios.join(', '));
+      info('(' + compose.length + ' caracteres)');
     }
-    const n = (compose.match(/^  [a-z][a-z0-9-]*:/gm) || []).length;
-    bien('el compose tiene ' + n + ' servicio(s) y ' + compose.length + ' caracteres');
   } catch (e) {
     mal('no se pudo leer docker-compose.yml: ' + e.message);
-    return false;
   }
 
   paso('4. Las variables obligatorias');
 
   /* El compose usa ${VAR:?mensaje}: si falta alguna, el despliegue se detiene.
-     Conviene saberlo antes de lanzarlo. */
-  const obligatorias = [];
+     Conviene saberlo antes de lanzarlo.
+     
+     Se quitan los comentarios primero: en las notas del compose se escribe
+     ${VAR:?...} como ejemplo, y eso NO es una variable de verdad. Sin esto
+     aparecia una variable "VAR" que no existe en ningun sitio. */
+  const sinComentarios = leerCompose().split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+  const obligatorias = new Set();
   const re = /\$\{([A-Z_][A-Z0-9_]*):\?/g;
   let m;
-  while ((m = re.exec(compose)) !== null) obligatorias.push(m[1]);
+  while ((m = re.exec(sinComentarios)) !== null) obligatorias.add(m[1]);
 
   const presentes = [];
   const ausentes = [];
@@ -175,6 +217,25 @@ async function comprobar() {
     info('genérelas con:  npm run desplegar:preparar');
   }
 
+  paso('5. Los dominios');
+
+  const dominios = dominiosPedidos();
+  if (!dominios.length) {
+    aviso('no se indicó ningún dominio.');
+    info('Sin dominio, el sistema solo será accesible desde dentro del servidor.');
+    info('Indique antes de desplegar, si los tiene:');
+    info('  $env:VISITAS_DOMINIO = "visitas.su-dominio.com"');
+    info('  $env:LICENCIAS_DOMINIO = "licencias.su-dominio.com"');
+    info('Y que los dos nombres apunten a 206.183.130.121 en su proveedor de DNS.');
+  } else {
+    for (const d of dominios) {
+      bien(d.host + '  ->  ' + d.servicio + ':' + d.puerto);
+      info('(' + d.paraQue + ')');
+    }
+    info('compruebe que esos nombres ya apuntan a 206.183.130.121, o el');
+    info('certificado HTTPS no se podrá emitir.');
+  }
+
   return fallos === 0;
 }
 
@@ -182,11 +243,18 @@ async function comprobar() {
 /* El despliegue                                                       */
 /* ------------------------------------------------------------------ */
 
-/** El proyecto, creándolo si no existe. */
+/**
+ * El proyecto, creándolo si no existe.
+ *
+ * Siempre devuelve el MISMO formato: el de `project.all`, que trae los entornos
+ * anidados. `project.create` devuelve otra cosa distinta ({ project, environment }),
+ * y mezclarlas fue un error que ya se corrigió una vez.
+ */
 async function asegurarProyecto() {
   const proyectos = await api('project.all');
   const lista = Array.isArray(proyectos) ? proyectos : [];
   const existente = lista.find((p) => p.name === NOMBRE_PROYECTO);
+
   if (existente) {
     bien('el proyecto "' + NOMBRE_PROYECTO + '" ya existe');
     return existente;
@@ -197,30 +265,159 @@ async function asegurarProyecto() {
     description: 'Sistema de visitantes y servidor de licencias',
   });
   bien('proyecto "' + NOMBRE_PROYECTO + '" creado');
-  return creado;
+
+  /* Se vuelve a leer la lista en vez de usar lo que devolvió create: así el
+     formato es siempre el mismo y no hay dos caminos que puedan divergir. */
+  const otraVez = await api('project.all');
+  const nuevo = (Array.isArray(otraVez) ? otraVez : []).find((p) => p.name === NOMBRE_PROYECTO);
+
+  if (!nuevo) {
+    // Si no aparece, se arma con lo que devolvió create para no quedarse sin nada.
+    const id = (creado.project && creado.project.projectId) || creado.projectId;
+    const entorno = creado.environment || {};
+    return {
+      projectId: id,
+      name: NOMBRE_PROYECTO,
+      environments: entorno.environmentId
+        ? [{ environmentId: entorno.environmentId, name: entorno.name, isDefault: true, compose: [] }]
+        : [],
+    };
+  }
+
+  return nuevo;
 }
 
 /** El entorno por defecto del proyecto (Dokploy siempre crea uno). */
-async function entornoDe(proyectoId) {
-  const e = await api('environment.byProjectId?projectId=' + encodeURIComponent(proyectoId));
-  const lista = Array.isArray(e) ? e : (e.environments || []);
-  if (!lista.length) throw new Error('El proyecto no tiene ningún entorno.');
-  return lista[0];
+async function entornoDe(proyecto) {
+  /* `project.all` devuelve los entornos ANIDADOS dentro de cada proyecto. No hay
+   * un endpoint suelto que los liste, así que se leen de ahí. */
+  const entornos = proyecto.environments || [];
+  if (!entornos.length) throw new Error('El proyecto no tiene ningún entorno.');
+  // El primero es el que Dokploy crea solo, y no se puede borrar.
+  return entornos.find((e) => e.isDefault) || entornos[0];
+}
+
+/** Los servicios de compose que ya tiene el entorno. */
+function serviciosDe(proyecto) {
+  const salida = [];
+  for (const e of proyecto.environments || []) {
+    for (const c of e.compose || []) {
+      salida.push(Object.assign({ environmentId: e.environmentId }, c));
+    }
+  }
+  return salida;
+}
+
+/**
+ * Los dominios que hay que configurar, si se indicaron.
+ *
+ * Se leen de variables de entorno, para que el que despliega decida:
+ *
+ *   VISITAS_DOMINIO=visitas.su-dominio.com
+ *   LICENCIAS_DOMINIO=licencias.su-dominio.com
+ *
+ * Si no se indica ninguno, no se crea nada: el sistema queda alcanzable solo
+ * desde dentro del servidor, y hay que configurarlos a mano en el panel.
+ */
+function dominiosPedidos() {
+  const salida = [];
+
+  const visitas = (process.env.VISITAS_DOMINIO || '').trim();
+  if (visitas) {
+    salida.push({
+      host: visitas,
+      puerto: Number(process.env.VISITAS_PUERTO || 3000),
+      // El nombre del servicio TAL COMO está en el docker-compose.yml, no el
+      // nombre del servicio de Dokploy: es lo que Traefik usa para enrutar.
+      servicio: 'app',
+      paraQue: 'el sistema de visitantes',
+    });
+  }
+
+  const licencias = (process.env.LICENCIAS_DOMINIO || '').trim();
+  if (licencias) {
+    salida.push({
+      host: licencias,
+      puerto: Number(process.env.LICENCIAS_PUERTO || 4100),
+      servicio: 'licencias',
+      paraQue: 'el servidor de licencias (lo necesitan los clientes para activar)',
+    });
+  }
+
+  return salida;
+}
+
+/**
+ * Configura los dominios de un servicio de compose.
+ *
+ * IMPORTANTE: los dominios de compose se aplican como ETIQUETAS de Docker, así
+ * que hay que crearlos ANTES de desplegar. Si se crean después, el cambio no
+ * surte efecto hasta el siguiente despliegue.
+ */
+async function configurarDominios(composeId) {
+  const pedidos = dominiosPedidos();
+  if (!pedidos.length) {
+    info('no se indicaron dominios.');
+    info('Para que el sistema sea accesible, indique antes de desplegar:');
+    info('  $env:VISITAS_DOMINIO = "visitas.su-dominio.com"');
+    info('  $env:LICENCIAS_DOMINIO = "licencias.su-dominio.com"');
+    info('Y que los dos nombres apunten a 206.183.130.121 en su proveedor de DNS.');
+    return [];
+  }
+
+  /* Los que ya existen, para no duplicar. */
+  let existentes = [];
+  try {
+    const r = await api('domain.byComposeId', { composeId: composeId });
+    existentes = Array.isArray(r) ? r : [];
+  } catch (e) {
+    existentes = [];
+  }
+
+  const creados = [];
+  for (const d of pedidos) {
+    const yaEsta = existentes.find((x) => x.host === d.host);
+    if (yaEsta) {
+      bien('el dominio ' + d.host + ' ya estaba configurado');
+      creados.push(yaEsta);
+      continue;
+    }
+
+    try {
+      const r = await api('domain.create', {
+        host: d.host,
+        port: d.puerto,
+        https: true,
+        certificateType: 'letsencrypt',
+        domainType: 'compose',
+        composeId: composeId,
+        serviceName: d.servicio,
+        stripPath: false,
+      });
+      bien('dominio ' + d.host + ' -> ' + d.servicio + ':' + d.puerto + '  (' + d.paraQue + ')');
+      creados.push(r);
+    } catch (e) {
+      mal('no se pudo configurar el dominio ' + d.host + ': ' + e.message);
+      info('recuerde que el nombre tiene que existir en su DNS y apuntar a este servidor');
+    }
+  }
+
+  return creados;
 }
 
 /** El servicio de compose, creándolo si no existe. */
-async function asegurarServicio(entornoId) {
-  const servicios = await api('compose.byEnvironmentId?environmentId=' + encodeURIComponent(entornoId));
-  const lista = Array.isArray(servicios) ? servicios : (servicios.compose || []);
-  const existente = lista.find((c) => c.name === NOMBRE_SERVICIO);
-
+async function asegurarServicio(proyecto, entornoId) {
+  /* No existe `compose.byEnvironmentId`: se comprobó contra el código de Dokploy.
+     Los servicios vienen dentro del proyecto. */
+  const existente = serviciosDe(proyecto).find((c) => c.name === NOMBRE_SERVICIO);
   const composeFile = leerCompose();
 
   if (existente) {
     await api('compose.update', {
       composeId: existente.composeId,
-      composeFile: composeFile,
       sourceType: 'raw',
+      composeType: 'docker-compose',
+      composeFile: composeFile,
     });
     bien('servicio actualizado con el compose del proyecto');
     return existente;
@@ -231,7 +428,9 @@ async function asegurarServicio(entornoId) {
     description: 'VisitaFlow: sistema de visitantes y servidor de licencias',
     environmentId: entornoId,
     composeType: 'docker-compose',
-    // El compose se manda tal cual: no hace falta repositorio Git.
+    /* El compose se manda tal cual: no hace falta repositorio Git. El
+       sourceType tiene que ser "raw" EXPLÍCITAMENTE, porque si no Dokploy lo
+       guarda como si viniera de Git y falla al desplegar. */
     sourceType: 'raw',
     composeFile: composeFile,
   });
@@ -264,11 +463,12 @@ async function desplegar() {
   paso('Creando todo en Dokploy');
 
   const proyecto = await asegurarProyecto();
-  const entorno = await entornoDe(proyecto.projectId);
+  const entorno = await entornoDe(proyecto);
   bien('entorno: ' + (entorno.name || entorno.environmentId));
 
-  const servicio = await asegurarServicio(entorno.environmentId);
+  const servicio = await asegurarServicio(proyecto, entorno.environmentId);
   const composeId = servicio.composeId;
+  if (!composeId) throw new Error('Dokploy no devolvió el identificador del servicio.');
 
   /* Las variables: se pasan las que tenga el entorno local. Las que falten hay
      que ponerlas a mano en el panel, y el despliegue lo dirá. */
@@ -285,6 +485,11 @@ async function desplegar() {
     info('no se pasaron variables: póngalas en el panel antes de desplegar');
   }
 
+  /* Los dominios van ANTES de desplegar: en un compose son etiquetas de Docker,
+     y si se crean después no surten efecto hasta el siguiente despliegue. */
+  paso('Dominios');
+  await configurarDominios(composeId);
+
   paso('Desplegando');
   info('esto construye la imagen y levanta los tres servicios; tarda varios minutos');
 
@@ -299,7 +504,7 @@ async function estado(composeId) {
   paso('Estado');
 
   try {
-    const d = await api('compose.one?composeId=' + encodeURIComponent(composeId));
+    const d = await api('compose.one', { composeId: composeId });
     const c = d.compose || d;
     console.log('  ' + (c.name || '') + '  estado: ' + (c.composeStatus || '—'));
     if (c.composeStatus === 'error') {
@@ -359,10 +564,7 @@ async function principal() {
       console.log('');
       return;
     }
-    const e = await entornoDe(p.projectId);
-    const servicios = await api('compose.byEnvironmentId?environmentId=' + encodeURIComponent(e.environmentId));
-    const lista = Array.isArray(servicios) ? servicios : (servicios.compose || []);
-    const s = lista.find((c) => c.name === NOMBRE_SERVICIO);
+    const s = serviciosDe(p).find((c) => c.name === NOMBRE_SERVICIO);
     if (!s) {
       console.log('');
       console.log('  El servicio todavía no existe.');

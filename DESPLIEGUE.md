@@ -5,6 +5,21 @@ licencias atendiendo a tus clientes.
 
 ---
 
+## Dos formas de desplegar: elige una
+
+| | **Por la API** (más rápido) | **A mano, en el panel** |
+|---|---|---|
+| Qué necesitas | Un token de API de Dokploy | El repositorio en Git |
+| Quién lo hace | `npm run desplegar` | Tú, siguiendo los pasos |
+| Dominios | Se configuran solos | Los pones en la pestaña Domains |
+| Pasos | 3 | 9 |
+
+**Si es la primera vez, usa la API**: está probado contra tu Dokploy y hace las
+comprobaciones antes de tocar nada. Los pasos manuales están más abajo, por si
+prefieres verlo todo en el panel o quieres entender qué hace cada cosa.
+
+---
+
 ## Cómo funciona esto, en una frase
 
 Este despliegue es **tu servidor**: levanta el sistema de visitantes y, sobre
@@ -31,29 +46,75 @@ dirección de Internet con HTTPS. Eso es lo que se configura en
 
 ---
 
-## Antes de empezar: qué hace falta
+## Camino A — Desplegar por la API (recomendado)
 
-| Cosa | Detalle |
-|---|---|
-| Un VPS | Con Dokploy instalado y Docker funcionando |
-| Dos dominios | Uno para el sistema, otro para el servidor de licencias |
-| El repositorio | VisitaFlow en un repositorio Git (Dokploy despliega desde ahí) |
-| El par de llaves | Generadas con `npm run keys:gen` en tu máquina |
-| La base de cédulas | `PadronLigero.bak`, 274 MB (se sube una sola vez) |
+### Paso A1 — Generar el token de API
 
-### El primer paso, siempre
+En tu panel de Dokploy: **Settings** → **Profile** → sección **API/CLI** →
+**Generate token**.
+
+> **Ese token da control total sobre tu Dokploy**: puede crear, desplegar y borrar
+> cualquier cosa del servidor. Trátalo como la contraseña del VPS. Se puede
+> revocar desde el mismo sitio donde lo generaste.
+
+### Paso A2 — Preparar los valores
 
 ```powershell
+cd visitaflow
 npm run desplegar:preparar
 ```
 
-Comprueba que esté todo, **genera los secretos y las llaves en base64**, y te dice
-exactamente qué pegar en Dokploy. Si algo falta, lo dice ahí y no a medio
-despliegue.
+Genera los secretos y las llaves en base64, y te dice si falta algo.
+
+### Paso A3 — Desplegar
+
+```powershell
+$env:DOKPLOY_TOKEN = "el-token-que-generaste"
+
+# Si ya tienes los dominios apuntando al VPS:
+$env:VISITAS_DOMINIO   = "visitas.tu-dominio.com"
+$env:LICENCIAS_DOMINIO = "licencias.tu-dominio.com"
+
+# Primero comprueba sin tocar nada:
+npm run desplegar:comprobar
+
+# Y si todo está bien:
+npm run desplegar
+```
+
+El script crea el proyecto, sube el `docker-compose.yml` **tal cual** (no hace
+falta repositorio Git: Dokploy admite el compose en crudo), guarda las variables,
+configura los dominios y despliega.
+
+> **Los dominios se configuran ANTES de desplegar**, y no es un detalle menor: en
+> un compose son etiquetas de Docker, así que si se crean después no surten efecto
+> hasta el siguiente despliegue.
+
+Luego puedes consultar cómo va con:
+
+```powershell
+npm run desplegar:estado
+```
+
+### Paso A4 — Terminar de preparar el sistema
+
+Después del primer despliegue, dentro del contenedor:
+
+```bash
+docker exec -it visitaflow-app node sql/01-crear.js
+```
+
+Y si ya subiste la base de cédulas (paso 8 más abajo):
+
+```bash
+docker exec -it visitaflow-app node sql/03-vista-ciudadanos.js
+```
 
 ---
 
-## Paso 1 — Generar las llaves del licenciamiento
+## Camino B — Desplegar a mano, en el panel
+
+### Paso 1 — Generar las llaves del licenciamiento
 
 En tu máquina, una sola vez. Estas llaves son la identidad del licenciamiento:
 con la privada se firman las licencias, con la pública cada instalación las
@@ -72,9 +133,7 @@ Se crean en `licencias-keys/`: `privada.pem`, `publica.pem` y `keyid.txt`.
 
 `npm run desplegar:preparar` te las da ya convertidas a base64.
 
----
-
-## Paso 2 — Subir el código a un repositorio
+### Paso 2 — Subir el código a un repositorio
 
 Dokploy despliega desde un repositorio Git. El proyecto ya está preparado como
 repositorio local con sus commits hechos; solo falta subirlo:
@@ -93,9 +152,7 @@ que no choque). Cualquier Git sirve.
 > git ls-files | Select-String "\.env|licencias-keys|\.pem"
 > ```
 
----
-
-## Paso 3 — Crear la aplicación en Dokploy
+### Paso 3 — Crear la aplicación en Dokploy
 
 1. **Projects** → crea un proyecto (`visitaflow`).
 2. **Create Service** → **Docker Compose**.
