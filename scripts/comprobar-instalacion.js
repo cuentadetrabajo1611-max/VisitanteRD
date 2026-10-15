@@ -376,8 +376,7 @@ async function comprobarAdministrador(pool, config) {
     const ruta = path.join(config.archivos.datos, 'CLAVE-ADMINISTRADOR.txt');
     if (fs.existsSync(ruta)) {
       aviso('las credenciales iniciales siguen en ' + ruta,
-        'Entre, cambie la contrasena (Usuarios) y borre ese archivo: docker exec -it ' +
-        CONTENEDOR + ' rm /app/datos/CLAVE-ADMINISTRADOR.txt');
+        'Entre, cambie la contrasena (Usuarios) y borre ese archivo.');
     }
     return;
   }

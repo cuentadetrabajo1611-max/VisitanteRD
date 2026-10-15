@@ -198,6 +198,18 @@ function normalizarDireccion(valor) {
   return (esRedLocal ? 'http://' : 'https://') + t;
 }
 
+/** ¿Es una direccion de verdad? Un pegado a mano puede traer cualquier cosa, y
+    URL_PUBLICA termina en los enlaces que se mandan por correo. */
+function direccionValida(direccion) {
+  try {
+    const u = new URL(direccion);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    return /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(u.hostname);
+  } catch (e) {
+    return false;
+  }
+}
+
 /** GET/POST con espera maxima: sin esto, un servidor que no contesta cuelga el asistente. */
 async function pedirJson(url, opciones, msEspera) {
   const control = new AbortController();
@@ -683,6 +695,11 @@ function textoInstalacion(datos) {
   }
   L.push('');
   L.push('  La primera vez tarda un par de minutos: SQL Server tiene que arrancar.');
+  L.push('  Espere a que la base conteste antes de seguir (repita el comando hasta que');
+  L.push('  devuelva un 1):');
+  L.push('');
+  L.push('    docker exec -it ' + bd + ' /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "' +
+    datos.claveSql + '" -C -Q "SELECT 1"');
   L.push('');
 
   L.push('-'.repeat(64));
@@ -913,8 +930,9 @@ async function principal() {
   console.log('');
   console.log('  ' + C.blanco + 'VisitaFlow - instalar en el servidor' + C.reset);
   console.log('  ' + C.gris + '='.repeat(66) + C.reset);
-  console.log('  ' + C.gris + 'Se le van a hacer cuatro preguntas. Todo lo demas lo hace este' + C.reset);
-  console.log('  ' + C.gris + 'programa: los secretos se inventan y el .env se escribe completo.' + C.reset);
+  console.log('  ' + C.gris + 'Son cuatro cosas: la licencia, la direccion, la clave de SQL Server' + C.reset);
+  console.log('  ' + C.gris + 'y si tiene el archivo de cedulas. Todo lo demas lo hace este programa:' + C.reset);
+  console.log('  ' + C.gris + 'los secretos se inventan y el .env se escribe completo.' + C.reset);
 
   if (carpeta !== RAIZ) nota('El .env y el INSTALACION.txt se van a escribir en: ' + carpeta);
 
@@ -1070,15 +1088,22 @@ async function principal() {
   /* 5. Donde va a quedar y con que clave. */
   titulo('4. La direccion y la base de datos');
 
-  let urlPublica = '';
+  let urlPublica = 'http://localhost:3000';
   for (let intento = 0; intento < 3; intento++) {
     const escrita = await lector.preguntar(
       '  ¿En que dominio o direccion va a quedar el sistema? (ej: https://visitas.junta-los-prados.org): '
     );
-    urlPublica = normalizarDireccion(escrita);
-    if (urlPublica) break;
-    aviso('sin direccion, el sistema solo sera alcanzable desde este servidor');
-    urlPublica = 'http://localhost:3000';
+    if (!escrita) {
+      aviso('sin direccion, el sistema solo sera alcanzable desde este servidor');
+      nota('Cuando la tenga, cambie URL_PUBLICA en el .env y reinicie: docker compose restart app');
+      break;
+    }
+    const candidata = normalizarDireccion(escrita);
+    if (!direccionValida(candidata)) {
+      falta('"' + escrita + '" no parece una direccion (ej: https://visitas.junta-los-prados.org)');
+      continue;
+    }
+    urlPublica = candidata;
     break;
   }
   bien('direccion publica: ' + urlPublica);
