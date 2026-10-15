@@ -143,6 +143,58 @@ const config = {
   },
 };
 
+/**
+ * Los secretos que estan escritos en este repositorio, que es publico.
+ *
+ * Cualquiera que los lea puede firmar un token de sesion valido y entrar como
+ * administrador. No es una debilidad teorica: se comprobo fabricando un token con
+ * el valor de reserva y verificandolo contra el sistema.
+ *
+ * Estan aqui los tres: el de reserva del codigo, el del .env.example y el que
+ * traia el .env de desarrollo.
+ */
+const SECRETOS_PUBLICOS = [
+  'cambie-este-secreto-en-produccion',
+  'visitaflow_local_2026_cambiar_en_el_vps',
+  'cambie-este-secreto',
+  'cambiame',
+  'secreto',
+];
+
+/**
+ * Los problemas que IMPIDEN operar con seguridad.
+ *
+ * Es distinto de los avisos: un aviso se muestra y el sistema arranca igual. Esto
+ * es para lo que no se puede dejar pasar, porque el sistema quedaria abierto a
+ * cualquiera y nadie se enteraria.
+ */
+config.inseguridades = function inseguridades() {
+  const problemas = [];
+
+  const secreto = String(config.sesion.secreto || '');
+  if (SECRETOS_PUBLICOS.indexOf(secreto) !== -1) {
+    problemas.push(
+      'JWT_SECRET es un valor publicado en el repositorio. Con el, cualquiera puede ' +
+      'fabricar una sesion de administrador y entrar al sistema. Genere uno con: ' +
+      'npm run desplegar:preparar'
+    );
+  } else if (secreto.length < 24) {
+    problemas.push('JWT_SECRET es demasiado corto (' + secreto.length + ' caracteres). Use al menos 24.');
+  }
+
+  /* El servidor de licencias es la pieza publicada en Internet: sin token, su
+     administracion queda al alcance de cualquiera que encuentre el puerto. */
+  if (!config.adminToken) {
+    problemas.push(
+      'ADMIN_TOKEN esta vacio. La administracion del servidor de licencias (crear ' +
+      'clientes, suspenderlos, cambiar modulos) quedaria abierta a cualquiera. ' +
+      'Definalo, o el servidor se negara a arrancar en produccion.'
+    );
+  }
+
+  return problemas;
+};
+
 /** Avisos de configuracion peligrosa. Se muestran al arrancar. */
 config.revisar = function revisar() {
   const avisos = [];

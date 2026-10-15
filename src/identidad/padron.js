@@ -200,15 +200,71 @@ async function porNombre(texto, limite) {
   terminos.forEach((t, i) => (tipos['t' + i] = bd.tipos.varChar(60)));
 
   try {
+    /* LA BASE BUSCA UN SOLO TERMINO, y los demas se filtran aqui.
+     *
+     * Esto no es una optimizacion: es que la otra forma NO FUNCIONA. Exigir en la
+     * base que coincidan todos los terminos obliga a recorrer los 7,8 millones de
+     * registros, porque ninguna de esas condiciones puede usar un indice (el UPPER
+     * envuelve la columna y el comodin inicial impide buscar por prefijo).
+     *
+     * Medido con "ABREU GUZMAN", que es justo lo que escribe un recepcionista
+     * (nombre y apellido): la consulta con los dos terminos NO TERMINA, revienta el
+     * tiempo de espera de 15 segundos y la busqueda falla entera. El recepcionista
+     * ve "la base de cedulas no esta disponible" y no encuentra a nadie.
+     *
+     * Buscando el termino MAS LARGO (que es el mas selectivo: el apellido suele ser
+     * mas largo y mas distintivo que el nombre) la base devuelve candidatos enseguida
+     * y el filtro del resto se hace aqui, sobre decenas de filas.
+     *
+     * Se piden mas candidatos que el limite pedido (4 veces, hasta 200) para que al
+     * filtrar queden suficientes. */
+    const ordenados = terminos.slice().sort((a, b) => b.length - a.length);
+    const principal = ordenados[0];
+    const resto = ordenados.slice(1);
+
+    const iPrincipal = terminos.indexOf(principal);
+
+    /* Cuantos candidatos se piden a la base.
+     *
+     * Es un equilibrio: mas candidatos dan mejores resultados al filtrar, pero
+     * cuestan mas cuando el termino es comun. Con "JUAN CARLOS" el termino largo es
+     * CARLOS, que es muy comun: con 80 candidatos solo quedaban 9 resultados de 20.
+     * Con 400 quedan los 20 y sigue siendo rapido, porque la base se detiene en
+     * cuanto junta 400 coincidencias, y con un termino comun las junta enseguida. */
+    const tope = Math.min(Math.max(Number(limite) || 20, 1), 50);
+    const candidatos = Math.min(Math.max(tope * 20, 100), 400);
+
+    /* Tampoco se ordena en la base: ORDER BY se aplica a TODAS las filas que pasan
+       el WHERE antes de quedarse con las primeras. Con un apellido comun como
+       RODRIGUEZ (235.463 personas), eso eran 11 segundos para devolver 20 filas.
+       Se ordena aqui abajo, sobre 20 filas. */
     const r = await bd.consultarPadron(
-      `SELECT TOP ${Math.min(Math.max(Number(limite) || 20, 1), 50)} ${COLUMNAS}
+      `SELECT TOP ${candidatos} ${COLUMNAS}
          FROM ${tabla()}
-        WHERE ${condiciones.join(' AND ')}
-        ORDER BY Apellido1, Apellido2, Nombres`,
-      parametros,
-      { tipos, espera: config.bd.msEsperaPadron }
+        WHERE ${condiciones[iPrincipal]}`,
+      { ['t' + iPrincipal]: parametros['t' + iPrincipal] },
+      { tipos: { ['t' + iPrincipal]: tipos['t' + iPrincipal] }, espera: config.bd.msEsperaPadron }
     );
-    return { disponible: true, resultados: r.recordset.map(comoCiudadano), motivo: null };
+
+    /* El filtro del resto de los terminos, sobre las filas que ya vinieron. */
+    const normalizar = (f) => ((f.Nombres || '') + ' ' + (f.Apellido1 || '') + ' ' + (f.Apellido2 || '')).toUpperCase();
+
+    const filtradas = resto.length
+      ? r.recordset.filter((f) => {
+          const todo = normalizar(f);
+          return resto.every((t) => todo.indexOf(t.toUpperCase()) !== -1);
+        })
+      : r.recordset;
+
+    const filas = filtradas.slice(0, tope).sort((a, b) => {
+      const ap = String(a.Apellido1 || '').localeCompare(String(b.Apellido1 || ''), 'es');
+      if (ap !== 0) return ap;
+      const ap2 = String(a.Apellido2 || '').localeCompare(String(b.Apellido2 || ''), 'es');
+      if (ap2 !== 0) return ap2;
+      return String(a.Nombres || '').localeCompare(String(b.Nombres || ''), 'es');
+    });
+
+    return { disponible: true, resultados: filas.map(comoCiudadano), motivo: null };
   } catch (e) {
     return { disponible: false, resultados: [], motivo: 'Error al consultar la base de cédulas: ' + e.message };
   }

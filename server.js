@@ -334,6 +334,39 @@ async function comprobarServidorDeLicencias() {
 }
 
 async function arrancar() {
+  /* Primero lo que IMPIDE operar con seguridad, y sin arrancar.
+   *
+   * Un secreto de sesion publicado en el repositorio no es un aviso: es un sistema
+   * abierto. Cualquiera que lea el repositorio puede fabricar un token de
+   * administrador y entrar. Se comprobo.
+   *
+   * Se para aqui y no se deja arrancar "avisando", porque un aviso en un registro
+   * que nadie lee equivale a no avisar, y el sistema queda expuesto mientras tanto.
+   * El contenedor se reinicia en bucle, que es escandaloso pero seguro: obliga a
+   * arreglarlo, y Dokploy muestra el motivo.
+   *
+   * En desarrollo NO se para: en la maquina de casa no hay nada que proteger y si
+   * molestaria mucho. */
+  const inseguridades = config.inseguridades();
+  if (inseguridades.length && config.esProduccion()) {
+    console.error('');
+    console.error('  ' + '='.repeat(68));
+    console.error('  NO SE PUEDE ARRANCAR: hay ' + inseguridades.length + ' problema(s) de seguridad.');
+    console.error('  ' + '='.repeat(68));
+    for (const p of inseguridades) {
+      console.error('');
+      console.error('  - ' + p);
+    }
+    console.error('');
+    console.error('  ' + '='.repeat(68));
+    console.error('  Con esta configuración el sistema quedaría abierto a cualquiera que');
+    console.error('  lea el repositorio, que es público. Arregle lo de arriba y vuelva a');
+    console.error('  desplegar. Para ver qué falta:  npm run config:revisar');
+    console.error('  ' + '='.repeat(68));
+    console.error('');
+    process.exit(1);
+  }
+
   const avisos = config.revisar();
   for (const a of avisos) console.warn('[visitaflow] AVISO: ' + a);
 
