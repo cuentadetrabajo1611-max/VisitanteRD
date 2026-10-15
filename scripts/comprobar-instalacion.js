@@ -440,14 +440,29 @@ async function principal() {
   const config = require(path.join(RAIZ, 'src', 'config.js'));
   const sql = requerirMssql();
 
-  console.log('  ' + C.gris + 'Direccion : ' + C.reset + (config.servidor.urlPublica || 'http://localhost:' + config.servidor.puerto));
+  /* ¿A DÓNDE SE LE PIDE LA COMPROBACIÓN?
+   *
+   * La variable de entorno MANDA sobre el archivo .env, y esto no es un detalle: si
+   * el .env del proyecto está al lado, dotenv lo carga y su URL_PUBLICA pisa la que
+   * se pasó por el entorno. El resultado era que se comprobaba OTRA instalación (la
+   * del .env) y se decía "todo bien" de un sistema que no era el que se estaba
+   * revisando. Un comprobador que da el visto bueno a lo que no es, es peor que no
+   * tenerlo: da confianza sin motivo.
+   *
+   * Así que: si se pasó URL_PUBLICA por el entorno, se usa esa, sin discusión. */
+  const urlPedida = (process.env.URL_PUBLICA || '').trim();
+  const urlComprobar = urlPedida || config.servidor.urlPublica;
+  const puertoComprobar = urlPedida ? (Number(new URL(urlPedida).port) || (urlPedida.indexOf('https:') === 0 ? 443 : 80)) : config.servidor.puerto;
+
+  console.log('  ' + C.gris + 'Direccion : ' + C.reset + (urlComprobar || 'http://localhost:' + config.servidor.puerto) +
+    (urlPedida ? C.gris + '   (indicada en URL_PUBLICA)' + C.reset : ''));
   console.log('  ' + C.gris + 'Base      : ' + C.reset + config.bd.sistema.server + ' / ' + config.bd.sistema.database);
   console.log('  ' + C.gris + 'Entorno   : ' + C.reset + config.servidor.entorno +
     (dentro ? '   (comprobando desde dentro del contenedor)' : ''));
 
   /* 1. La aplicacion. */
   titulo('1. La aplicacion');
-  const aplicacion = await comprobarAplicacion(config.servidor.puerto, config.servidor.urlPublica);
+  const aplicacion = await comprobarAplicacion(puertoComprobar, urlComprobar);
   const salud = aplicacion ? aplicacion.salud : null;
 
   /* 2 y 5 necesitan la base. Si no se llega desde aqui y el contenedor esta
