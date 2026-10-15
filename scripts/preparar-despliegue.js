@@ -316,10 +316,20 @@ console.log('');
 console.log('  ' + C.cian + '--- Llaves del licenciamiento (base64) ---' + C.reset);
 console.log('');
 if (b64Privada) {
-  console.log('  ' + C.gris + '# Solo el servicio "licencias" la necesita' + C.reset);
+  /* La privada se imprime ENTERA a proposito, y no es un descuido.
+   *
+   * El .env esta ignorado por git, asi que no viaja al servidor: la unica forma de que
+   * el servicio "licencias" tenga su llave es pegarla a mano en el entorno de Dokploy.
+   * Si no se pega, ese contenedor NO arranca (el servidor se niega a firmar sin llave,
+   * a proposito) y el sintoma que se ve desde fuera es "el despliegue falla", que no
+   * dice nada de la causa. Por eso va aqui, copiable, y con el aviso delante. */
+  console.log('  ' + C.ambar + '  IMPORTANTE: la privada hay que pegarla en Dokploy. Sin ella el' + C.reset);
+  console.log('  ' + C.ambar + '  servicio "licencias" NO arranca (se niega a firmar sin su llave).' + C.reset);
+  console.log('  ' + C.gris + '# Solo el servicio "licencias" la necesita. NO la ponga tambien en "app".' + C.reset);
   dato('LICENCIA_LLAVE_PRIVADA_B64=', '');
   console.log('    ' + b64Privada);
   console.log('');
+  console.log('  ' + C.gris + '# La publica la usan la app y el servidor de licencias.' + C.reset);
   dato('LICENCIA_LLAVE_PUBLICA_B64=', '');
   console.log('    ' + b64Publica);
 } else {

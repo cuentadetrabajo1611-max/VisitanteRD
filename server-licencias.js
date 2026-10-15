@@ -944,8 +944,20 @@ const PUERTO = util.entero(process.env.PUERTO_LICENCIAS, 4100, 1, 65535);
 
 function comprobarLlaves() {
   try {
+    /* Cada llave se comprueba por separado, y se dice CUÁL falta.
+     *
+     * Antes se llamaba primero a lic.keyId(), que necesita las DOS llaves. Al faltar la
+     * privada, el error que salía hablaba de la pública: "No se encontro la llave
+     * publica del licenciamiento". En el VPS la privada se pasa por variable de entorno,
+     * así que el mensaje mandaba a buscar donde no era, y quien lo leyera se pondría a
+     * mirar la pública, que no faltaba. */
+    const faltaPrivada = (() => { try { lic.llavePrivada(); return null; } catch (e) { return e.message; } })();
+    if (faltaPrivada) throw new Error('Falta la LLAVE PRIVADA (la que firma las licencias). ' + faltaPrivada);
+
+    const faltaPublica = (() => { try { lic.llavePublica(); return null; } catch (e) { return e.message; } })();
+    if (faltaPublica) throw new Error('Falta la LLAVE PÚBLICA (la que verifica). ' + faltaPublica);
+
     const id = lic.keyId();
-    lic.llavePrivada();
     console.log('[licencias] llave privada disponible, key_id ' + id);
 
     /* Se avisa si falta el token de instalacion, porque sin el las rutas de
