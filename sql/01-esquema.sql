@@ -238,7 +238,20 @@ BEGIN
     activo         BIT NOT NULL CONSTRAINT DF_vf_plantillas_activo DEFAULT 1,
     creado         DATETIMEOFFSET(0) NOT NULL CONSTRAINT DF_vf_plantillas_creado DEFAULT SYSDATETIMEOFFSET()
   );
-  CREATE INDEX IX_vf_plantillas_tenant ON dbo.vf_plantillas (tenant_id, activo);
+  CREATE INDEX IX_vf_plantillas_tenant ON dbo.vf_plantillas_gafete (tenant_id, activo);
+END
+GO
+
+/* El indice, aparte y comprobando si ya existe.
+   Estaba dentro del bloque de arriba, y eso hacia que una base creada ANTES de
+   renombrar la tabla a vf_plantillas_gafete se quedara SIN el indice: el bloque
+   no se volvia a ejecutar porque la tabla ya existia. Aqui se crea si falta, en
+   cualquier base. */
+IF OBJECT_ID('dbo.vf_plantillas_gafete', 'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_vf_plantillas_tenant'
+                     AND object_id = OBJECT_ID('dbo.vf_plantillas_gafete'))
+BEGIN
+  CREATE INDEX IX_vf_plantillas_tenant ON dbo.vf_plantillas_gafete (tenant_id, activo);
 END
 GO
 

@@ -20,7 +20,7 @@
     "test:primer-arranque": "node scripts/probar-primer-arranque.js",
     "test:impresion": "node scripts/probar-impresion.js",
     "test:personas": "node sql/95-pruebas-personas.js",
-    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
+    "test:todo": "npm run test:licencias && npm run test:qr && npm run test:esquema && npm run test:volumen && npm run test:servidor-licencias && npm run test:panel && npm run test && npm run test:personas && npm run test:produccion && npm run test:primer-arranque && npm run test:impresion",
     "respaldo": "node scripts/respaldo.js",
     "respaldo:listar": "node scripts/respaldo.js --listar",
     "respaldo:restaurar": "node scripts/respaldo.js --restaurar",
@@ -53,7 +53,8 @@
     "desplegar": "node scripts/desplegar-dokploy.js --desplegar",
     "desplegar:comprobar": "node scripts/desplegar-dokploy.js --comprobar",
     "desplegar:estado": "node scripts/desplegar-dokploy.js --estado",
-    "test:volumen": "node scripts/probar-datos-volumen.js"
+    "test:volumen": "node scripts/probar-datos-volumen.js",
+    "test:esquema": "node scripts/probar-esquema-nuevo.js"
   },
   "keywords": [
     "visitantes",
