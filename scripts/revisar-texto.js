@@ -45,6 +45,21 @@ function recorrer(dir, salida) {
   return salida;
 }
 
+/**
+ * El archivo dice que sus marcas rotas son A PROPOSITO.
+ *
+ * Hay sitios donde el texto roto es el tema: la prueba del CSV comprueba que Excel no
+ * muestre "PEÃ‘A", asi que tiene que escribir "PEÃ‘A" en algun sitio. Sin esta excepcion,
+ * `npm run verificar` daba error para siempre por culpa de esas cadenas, y una alarma
+ * que siempre suena deja de mirarse.
+ *
+ * Se pide una marca explicita en el propio archivo para que no valga como excusa
+ * general: quien la ponga tiene que haber escrito por que.
+ */
+function tieneExcepcion(texto) {
+  return /marcas-rotas-a-proposito/.test(texto);
+}
+
 function principal() {
   const archivos = recorrer(RAIZ, []);
   console.log('');
@@ -55,6 +70,7 @@ function principal() {
 
   let conMarcas = 0;
   let totalAcentos = 0;
+  let excepciones = 0;
 
   for (const a of archivos) {
     const buffer = fs.readFileSync(a);
@@ -64,18 +80,24 @@ function principal() {
     if (!acentos && !marcas) continue;
 
     totalAcentos += acentos;
-    if (marcas) conMarcas++;
+
+    const exceptuado = marcas > 0 && tieneExcepcion(texto);
+    if (marcas && !exceptuado) conMarcas++;
+    if (exceptuado) excepciones++;
 
     const rel = path.relative(RAIZ, a);
     console.log(
       '  ' + rel.padEnd(32) + String(acentos).padStart(7) + String(marcas).padStart(14) +
-      (marcas ? '   <-- REVISAR' : '')
+      (exceptuado ? '   (a proposito)' : (marcas ? '   <-- REVISAR' : ''))
     );
   }
 
   console.log('  ' + '-'.repeat(62));
   console.log('  ' + archivos.length + ' archivos revisados, ' + totalAcentos + ' acentos encontrados');
   console.log('  ' + (conMarcas ? conMarcas + ' archivo(s) con marcas de doble codificacion' : 'Ninguna marca de doble codificacion'));
+  if (excepciones) {
+    console.log('  (' + excepciones + ' archivo(s) con marcas declaradas a proposito, no cuentan)');
+  }
   console.log('');
 
   process.exit(conMarcas ? 1 : 0);

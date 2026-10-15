@@ -3,6 +3,13 @@
  *
  *   node scripts/probar-reportes.js
  *
+ * marcas-rotas-a-proposito
+ * ------------------------
+ * Este archivo escribe "PEÃ‘A" a proposito, en varios sitios. No es un error de
+ * codificacion: es EL ejemplo de lo que sale cuando la exportacion no lleva la
+ * codificacion bien, o sea justo lo que la prueba existe para detectar. La marca de
+ * arriba le dice a `npm run texto:revisar` que no lo cuente como problema.
+ *
  * POR QUE
  * -------
  * El recepcionista registra a "JOSE MANUEL DE PEÑA" y a "CARLOS JOSE RODRIGUEZ". Si la

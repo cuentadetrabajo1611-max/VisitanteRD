@@ -36,6 +36,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const RAIZ = path.resolve(__dirname, '..');
 require(path.join(RAIZ, 'node_modules', 'dotenv')).config({ path: path.join(RAIZ, '.env') });
@@ -197,6 +198,31 @@ async function comprobar() {
     }
   } catch (e) {
     mal('no se pudo leer docker-compose.yml: ' + e.message);
+  }
+
+  /* Que el codigo que se va a desplegar al menos cargue.
+   *
+   * Esto no es teoria: dos scripts del despliegue se caian al ejecutarse porque llamaban
+   * a funciones que no existian. Si eso pasa en un modulo del sistema, el contenedor
+   * arranca y se muere en bucle, y desde fuera solo se ve "el despliegue falla". Se
+   * comprueba aqui, que es el ultimo momento antes de tocar el servidor. */
+  {
+    const r = spawnSync(process.execPath, [path.join(RAIZ, 'scripts', 'revisar-despliegue.js')], {
+      encoding: 'utf8',
+      cwd: RAIZ,
+      timeout: 240000,
+    });
+
+    const salida = ((r.stdout || '') + (r.stderr || '')).replace(/\u001b\[[0-9;]*m/g, '');
+    const fallos = salida.split('\n').filter((l) => /^\s*\[X\]/.test(l));
+
+    if (r.status === 0) {
+      bien('el código del sistema compila y sus módulos se cargan');
+    } else {
+      mal('el código tiene ' + (fallos.length || 'algún') + ' problema(s):');
+      for (const f of fallos.slice(0, 5)) info(f.trim().slice(0, 110));
+      info('Ejecute "npm run despliegue:revisar" para verlo entero.');
+    }
   }
 
   paso('4. Las variables obligatorias');

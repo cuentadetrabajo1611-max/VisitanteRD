@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const RAIZ = path.resolve(__dirname, '..');
 
@@ -449,11 +450,124 @@ function revisarComandosDocumentados() {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * Comprueba que TODO lo que se puede ejecutar al menos COMPILA.
+ *
+ * POR QUE
+ * -------
+ * Dos scripts de despliegue se caian al ejecutarse porque llamaban a funciones que no
+ * existian en su archivo (`aviso` en uno, `info` en el otro). Eso no lo detecta leer el
+ * codigo ni pasar las pruebas: solo se ve al ejecutar el comando, y justo en el peor
+ * momento, que es cuando ya estas desplegando.
+ *
+ * `node --check` no ejecuta nada: solo compila. No encuentra una funcion que falta, pero
+ * si una sintaxis rota, un parentesis mal cerrado o un archivo a medio guardar. Es
+ * barato y va en la revision previa al despliegue.
+ *
+ * Se revisan todos los archivos .js que mencionan los comandos de npm, mas los dos
+ * servidores y los del sql/.
+ */
+function revisarSintaxis() {
+  console.log('');
+  console.log('  --- sintaxis de todo lo que se puede ejecutar ---');
+
+  const archivos = new Set();
+
+  /* Los que mencionan los comandos de npm. */
+  const comandos = require(path.join(RAIZ, 'package.json')).scripts || {};
+  for (const texto of Object.values(comandos)) {
+    const re = /((?:scripts|sql|src)\/[A-Za-z0-9_./-]+\.js)/g;
+    let m;
+    while ((m = re.exec(texto)) !== null) archivos.add(m[1]);
+  }
+
+  /* Y los puntos de entrada. */
+  for (const f of ['server.js', 'server-licencias.js']) {
+    if (fs.existsSync(path.join(RAIZ, f))) archivos.add(f);
+  }
+
+  let malos = 0;
+  for (const rel of [...archivos].sort()) {
+    const ruta = path.join(RAIZ, rel);
+    if (!fs.existsSync(ruta)) continue;
+
+    const r = spawnSync(process.execPath, ['--check', ruta], { encoding: 'utf8', timeout: 30000 });
+    if (r.status !== 0) {
+      const motivo = ((r.stderr || '').split('\n').find((l) => /Error/.test(l)) || '').trim();
+      error(rel + ' no compila: ' + motivo.slice(0, 90));
+      malos++;
+    }
+  }
+
+  if (!malos) {
+    bien(archivos.size + ' archivos ejecutables compilan');
+  }
+
+  return archivos;
+}
+
+/**
+ * Carga los modulos del sistema para comprobar que no se caen al cargarse.
+ *
+ * `node --check` solo mira la sintaxis. Los dos fallos reales que hubo —`aviso` e `info`
+ * sin definir— eran funciones que no existian, y eso la sintaxis no lo ve: se descubre
+ * al ejecutar.
+ *
+ * Cargarlos NO ejecuta nada peligroso: el sistema usa `require.main === module` para
+ * distinguir "me estan importando" de "me estan ejecutando", asi que un modulo que se
+ * carga solo define sus funciones. Lo que si se descubre aqui es un `require` roto, un
+ * error de nivel superior o una constante mal definida.
+ */
+function revisarCarga() {
+  console.log('');
+  console.log('  --- que los módulos se carguen sin caerse ---');
+
+  const srcdir = path.join(RAIZ, 'src');
+  const modulos = [];
+
+  const recorrer = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) recorrer(p);
+      else if (e.name.endsWith('.js')) modulos.push(p);
+    }
+  };
+  if (fs.existsSync(srcdir)) recorrer(srcdir);
+
+  let malos = 0;
+  for (const abs of modulos) {
+    const rel = path.relative(RAIZ, abs).replace(/\\/g, '/');
+
+    /* Se carga en un proceso aparte para que un modulo no contamine a los demas. */
+    const codigo = 'require(' + JSON.stringify(abs) + ');';
+    const r = spawnSync(process.execPath, ['-e', codigo], {
+      encoding: 'utf8',
+      cwd: RAIZ,
+      timeout: 30000,
+    });
+
+    if (r.status !== 0) {
+      const salida = (r.stderr || '') + (r.stdout || '');
+      const motivo = (salida.split('\n').find((l) => /Error/.test(l)) || '').trim();
+      error(rel + ' se cae al cargarse: ' + motivo.slice(0, 90));
+      malos++;
+    }
+  }
+
+  if (!malos) {
+    bien(modulos.length + ' módulos del sistema se cargan sin errores');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+
 function principal() {
   console.log('');
   console.log('  VisitaFlow - revision del despliegue');
   console.log('  ' + '='.repeat(62));
 
+  revisarSintaxis();
+  revisarCarga();
   revisarDockerfile();
   revisarDockerignore();
   revisarRequires();
