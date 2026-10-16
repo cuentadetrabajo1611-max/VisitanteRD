@@ -1733,6 +1733,26 @@ async function tenantDeLaInstalacion() {
   try {
     const r = await bd.consultar('SELECT codigo FROM vf_tenants WHERE estado = @e', { e: 'activo' });
     if (r.recordset.length === 1) return r.recordset[0].codigo;
+
+    /* Más de una institución activa: no se elige una al azar.
+     *
+     * Elegir "la primera" sería peor que no dejar entrar, porque el recepcionista
+     * podría registrar visitas en la institución equivocada sin darse cuenta. Pero
+     * fallar en silencio tampoco vale: quien lo sufre ve "no puedo entrar" y no tiene
+     * cómo saber qué pasó. Se deja dicho en el registro del servidor, con el comando
+     * exacto que lo arregla.
+     *
+     * Esto no debería pasar (al activar una licencia se desactivan las demás
+     * instituciones), pero si pasa por lo que sea —una base restaurada de otro
+     * servidor, un INSERT a mano— hay que poder diagnosticarlo en un minuto. */
+    if (r.recordset.length > 1) {
+      console.error(
+        '[acceso] Esta instalación tiene ' + r.recordset.length + ' instituciones activas (' +
+        r.recordset.map((x) => x.codigo).join(', ') + ') y no hay licencia que diga cuál es la suya. ' +
+        'Una instalación es de UN cliente. Deje activa solo la correcta con: ' +
+        "UPDATE vf_tenants SET estado = 'suspendido' WHERE codigo <> 'LA-CORRECTA';"
+      );
+    }
   } catch (e) {
     /* la base puede no existir todavía */
   }

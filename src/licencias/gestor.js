@@ -226,6 +226,26 @@ async function guardarEnBase(texto, evaluacion) {
     }
   );
 
+  /* Una instalación es de UN cliente: la institución de esta licencia es la única
+   * activa.
+   *
+   * Sin esto, activar la licencia de otro cliente dejaba DOS instituciones activas: la
+   * anterior seguía como 'activo'. Y entonces el sistema deja de saber cuál es la suya
+   * —`tenantDeLaInstalacion()` devuelve null cuando hay más de una— así que si además
+   * se pierde el archivo de licencia (un volumen que no se montó, un contenedor
+   * recreado), NADIE PUEDE ENTRAR y el mensaje no dice por qué.
+   *
+   * Se comprobó en vivo: se activó la licencia de otro cliente y quedaron dos activas.
+   *
+   * La institución anterior NO se borra: sus datos, sus visitas y sus usuarios siguen
+   * ahí. Solo se desactiva, que es lo correcto: si el cliente vuelve, todo está donde
+   * lo dejó. */
+  await bd.consultar(
+    `UPDATE vf_tenants SET estado = 'suspendido', actualizado = SYSDATETIMEOFFSET()
+      WHERE estado = 'activo' AND codigo <> @codigo`,
+    { codigo: c.tenant }
+  );
+
   await bd.consultar(
     `MERGE vf_licencias AS destino
        USING (SELECT @licencia_id AS licencia_id) AS origen
