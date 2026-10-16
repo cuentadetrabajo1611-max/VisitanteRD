@@ -74,7 +74,8 @@
     "test:primer-dia": "node scripts/probar-primer-dia.js",
     "test:un-solo-cliente": "node scripts/probar-un-solo-cliente.js",
     "test:busqueda-nombres": "node scripts/probar-busqueda-nombres.js",
-    "test:promesas": "node scripts/probar-promesas.js"
+    "test:promesas": "node scripts/probar-promesas.js",
+    "listo:comprobar": "node scripts/comprobar-preparacion.js"
   },
   "keywords": [
     "visitantes",
