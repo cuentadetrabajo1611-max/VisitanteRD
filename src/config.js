@@ -75,7 +75,16 @@ const config = {
     padronActivo: booleano('PADRON_ACTIVO', true),
     tablaPadron: texto('PADRON_TABLA', 'dbo.CIUDADANOS'),
     // Tiempo maximo que puede tardar una consulta al padron antes de rendirse.
-    msEsperaPadron: numero('PADRON_MS_ESPERA', 15000),
+    //
+    // 20 segundos, y no menos, por una razon medida: el padron SOLO tiene el indice de
+    // la cedula, asi que buscar por un apellido poco comun obliga a recorrer los 7,8
+    // millones de filas. Esa pasada tarda entre 10 y 13 segundos en un servidor normal.
+    // Con el limite anterior (15) la busqueda moria justo al final y el recepcionista
+    // veia "no hay resultados" para alguien que SI esta en el padron.
+    //
+    // Los apellidos comunes no se ven afectados: responden en menos de 200 ms porque el
+    // motor para en cuanto junta las filas que se le piden.
+    msEsperaPadron: numero('PADRON_MS_ESPERA', 20000),
     cifrarConexion: booleano('DB_ENCRYPT', false),
   },
 

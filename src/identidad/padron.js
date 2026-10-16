@@ -171,6 +171,56 @@ async function porCedula(cedula) {
  * nombres o en cualquiera de los apellidos): es lo que permite encontrar
  * "ABREU GUZMAN" cuando el apellido esta partido en dos columnas.
  */
+/**
+ * Quita los acentos, para comparar como compara la base.
+ *
+ * `normalize('NFD')` separa la letra de su tilde y el reemplazo borra las tildes
+ * sueltas. Ademas se cambia la enie por ene, porque NFD no la separa: la Ñ es una letra
+ * propia, no una N con tilde.
+ *
+ * Se usa en el filtro de memoria. Tiene que hacer EXACTAMENTE lo mismo que la
+ * intercalacion de la base, o los dos filtros se contradicen.
+ */
+function sinAcentos(texto) {
+  return String(texto || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/Ñ/g, 'N')
+    .replace(/ñ/g, 'n');
+}
+
+/**
+ * Una columna de texto, preparada para buscar SIN TILDES.
+ *
+ * EL PROBLEMA QUE RESUELVE
+ * ------------------------
+ * La base de cedulas usa la intercalacion Modern_Spanish_CI_AS: la "CI" ignora
+ * mayusculas, pero la "AS" NO ignora los acentos. O sea que "PENA" y "PEÑA" son
+ * palabras distintas para la base.
+ *
+ * Y en Republica Dominicana eso no es un detalle: de las 99.143 personas apellidadas
+ * PEÑA, la busqueda "PENA" encontraba 510. El recepcionista que teclea sin la enie
+ * —que es como se teclea con prisa, y como teclean muchos teclados— perdia el 99,5%
+ * de los resultados y concluia que esa persona no estaba. Lo mismo con RODRIGUEZ
+ * escrito con tilde: 33 de 235.463.
+ *
+ * Medido: "CAAMANO" no encontraba a NADIE de los 333 CAAMAÑO, y ademas tardaba 15
+ * segundos. Con esto, encuentra y tarda 84 milisegundos.
+ *
+ * COMO
+ * ----
+ * Se le pone a la columna una intercalacion que SI ignora los acentos (AI =
+ * accent-insensitive). No se toca el padron: es solo para esta consulta, y el padron
+ * sigue siendo de solo lectura.
+ *
+ * OJO CON EL NOMBRE DE LA INTERCALACION: tiene que existir en el motor. Latin1_General
+ * es la mas compatible; si algun dia se cambia, hay que comprobar que el servidor la
+ * acepta, porque un nombre que no existe no da un resultado vacio: da un error.
+ */
+function campoTexto(columna) {
+  return columna + ' COLLATE Latin1_General_CI_AI';
+}
+
 async function porNombre(texto, limite) {
   const terminos = String(texto || '')
     .trim()
@@ -187,13 +237,9 @@ async function porNombre(texto, limite) {
     return { disponible: false, resultados: [], motivo: 'La base de cédulas no está disponible.' };
   }
 
-  const condiciones = [];
   const parametros = {};
   terminos.forEach((t, i) => {
     parametros['t' + i] = '%' + t.toUpperCase() + '%';
-    condiciones.push(
-      `(UPPER(Nombres) LIKE @t${i} OR UPPER(Apellido1) LIKE @t${i} OR UPPER(Apellido2) LIKE @t${i})`
-    );
   });
 
   const tipos = {};
@@ -238,36 +284,110 @@ async function porNombre(texto, limite) {
        el WHERE antes de quedarse con las primeras. Con un apellido comun como
        RODRIGUEZ (235.463 personas), eso eran 11 segundos para devolver 20 filas.
        Se ordena aqui abajo, sobre 20 filas. */
-    const r = await bd.consultarPadron(
-      `SELECT TOP ${candidatos} ${COLUMNAS}
-         FROM ${tabla()}
-        WHERE ${condiciones[iPrincipal]}`,
-      { ['t' + iPrincipal]: parametros['t' + iPrincipal] },
-      { tipos: { ['t' + iPrincipal]: tipos['t' + iPrincipal] }, espera: config.bd.msEsperaPadron }
-    );
 
-    /* El filtro del resto de los terminos, sobre las filas que ya vinieron. */
-    const normalizar = (f) => ((f.Nombres || '') + ' ' + (f.Apellido1 || '') + ' ' + (f.Apellido2 || '')).toUpperCase();
+    /* LAS TRES COLUMNAS EN UNA SOLA CONSULTA, con un UNION ALL y un TOP por encima.
+     *
+     * Esto es lo que hace que la busqueda FUNCIONE, y costo encontrarlo. Lo que se
+     * probo y por que se quedo con esto:
+     *
+     *  a) Las tres columnas en un solo OR
+     *     —"Nombres LIKE @t OR Apellido1 LIKE @t OR Apellido2 LIKE @t"— NO FUNCIONA:
+     *     el motor resuelve el OR entero antes de quedarse con las filas que se le
+     *     piden, asi que no puede parar al llenar el cupo. Medido con "CAAMANO" (336
+     *     personas de 7,8 millones): se pasa de 15 segundos y muere.
+     *
+     *  b) Una consulta por columna, una detras de otra, tampoco: si el termino es raro
+     *     hay que recorrer las TRES, y cada recorrido son ~13 segundos.
+     *
+     *  c) UNION ALL de las tres con un TOP global: el motor puede ir sacando filas de
+     *     cada rama y parar en cuanto tiene las que se le piden. Medido: un apellido
+     *     comun tarda 83 ms y uno raro 10 segundos (una sola pasada, no tres).
+     *
+     * POR QUE UN APELLIDO RARO TARDA 10 SEGUNDOS
+     * ------------------------------------------
+     * Porque el padron SOLO tiene el indice de la cedula. Buscar por apellido es un
+     * recorrido completo de 7,8 millones de filas, y no hay forma de evitarlo sin
+     * anadir un indice a una base que es de solo lectura.
+     *
+     * Lo que si se puede es no ENGAÑAR: si el termino no existe, hay que recorrer la
+     * tabla entera para poder decirlo, y eso no cabe en el tiempo de espera. En ese
+     * caso se devuelve "la busqueda tardo demasiado" y NO "no hay resultados", porque
+     * son cosas distintas: el recepcionista que ve "no hay" concluye que esa persona no
+     * esta en el padron, y puede estar equivocado. */
+    let r;
+    try {
+      r = await bd.consultarPadron(
+        `SELECT TOP ${candidatos} ${COLUMNAS} FROM (
+           SELECT ${COLUMNAS} FROM ${tabla()} WHERE ${campoTexto('Apellido1')} LIKE @t
+           UNION ALL
+           SELECT ${COLUMNAS} FROM ${tabla()} WHERE ${campoTexto('Apellido2')} LIKE @t
+           UNION ALL
+           SELECT ${COLUMNAS} FROM ${tabla()} WHERE ${campoTexto('Nombres')}   LIKE @t
+         ) AS encontrados`,
+        { t: parametros['t' + iPrincipal] },
+        { tipos: { t: tipos['t' + iPrincipal] }, espera: config.bd.msEsperaPadron }
+      );
+    } catch (e) {
+      /* Si la base no contesta a tiempo, se dice QUE PASO, y no se disfraza de
+       * "no hay resultados". */
+      if (/timeout|espera|ETIMEOUT|failed to complete/i.test(e.message)) {
+        return {
+          disponible: true,
+          resultados: [],
+          motivo: 'La búsqueda tardó demasiado: ese apellido es poco común y hay que revisar ' +
+            'toda la base. Pruebe con la cédula, o con el nombre y el apellido juntos.',
+          incompleta: true,
+        };
+      }
+      throw e;
+    }
+
+    /* La misma persona puede salir por el apellido y por el nombre. */
+    const vistos = new Set();
+    r.recordset = r.recordset.filter((f) => {
+      const clave = String(f.Cedula);
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+
+    /* El filtro del resto de los terminos, sobre las filas que ya vinieron.
+     *
+     * Se quitan los acentos de LOS DOS LADOS, igual que hace la base. Si aqui se
+     * comparara con acentos, la base devolveria a CAAMAÑO al buscar "CAAMANO" y este
+     * filtro lo descartaria: el arreglo de la base no serviria de nada. */
+    const normalizar = (f) => sinAcentos(
+      ((f.Nombres || '') + ' ' + (f.Apellido1 || '') + ' ' + (f.Apellido2 || '')).toUpperCase()
+    );
 
     const filtradas = resto.length
       ? r.recordset.filter((f) => {
           const todo = normalizar(f);
-          return resto.every((t) => todo.indexOf(t.toUpperCase()) !== -1);
+          return resto.every((t) => todo.indexOf(sinAcentos(t.toUpperCase())) !== -1);
         })
       : r.recordset;
 
-    const filas = filtradas.slice(0, tope).sort((a, b) => {
-      const ap = String(a.Apellido1 || '').localeCompare(String(b.Apellido1 || ''), 'es');
-      if (ap !== 0) return ap;
-      const ap2 = String(a.Apellido2 || '').localeCompare(String(b.Apellido2 || ''), 'es');
-      if (ap2 !== 0) return ap2;
-      return String(a.Nombres || '').localeCompare(String(b.Nombres || ''), 'es');
-    });
-
-    return { disponible: true, resultados: filas.map(comoCiudadano), motivo: null };
+    return { disponible: true, resultados: ordenarYRecortar(filtradas, tope).map(comoCiudadano), motivo: null };
   } catch (e) {
     return { disponible: false, resultados: [], motivo: 'Error al consultar la base de cédulas: ' + e.message };
   }
+}
+
+/**
+ * Ordena por apellidos y se queda con los primeros.
+ *
+ * Se ordena AQUI y no en la base: `ORDER BY` se aplica a todas las filas que pasan el
+ * filtro antes de quedarse con las primeras, y con un apellido comun eso eran 11
+ * segundos para devolver 20 filas.
+ */
+function ordenarYRecortar(filas, tope) {
+  return (filas || []).slice().sort((a, b) => {
+    const ap = String(a.Apellido1 || '').localeCompare(String(b.Apellido1 || ''), 'es');
+    if (ap !== 0) return ap;
+    const ap2 = String(a.Apellido2 || '').localeCompare(String(b.Apellido2 || ''), 'es');
+    if (ap2 !== 0) return ap2;
+    return String(a.Nombres || '').localeCompare(String(b.Nombres || ''), 'es');
+  }).slice(0, tope);
 }
 
 /**
